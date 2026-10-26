@@ -26,7 +26,7 @@ Then complete the database/auth setup below and run:
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. The default home page is the public tournament directory, with Games, Players, Sessions and Tournaments navigation and an Admin login link. Restart the dev server after changing environment variables. Without credentials, public pages show empty event lists and admin sign-in is unavailable. Setup instructions live in this README; the five-step setup panel has been removed from the app. Once configured, organizer routes require sign-in.
+Open **http://127.0.0.1:5173**. The default home page is the Qmaster overview, with live-game counts, ongoing events and upcoming schedules. Navigation links to Home, Games, Players, Sessions and Tournaments, with an Admin login link. Restart the dev server after changing environment variables. Without credentials, public pages show empty event lists and admin sign-in is unavailable. Setup instructions live in this README; the five-step setup panel has been removed from the app. Once configured, organizer routes require sign-in.
 
 This is a Vite SPA. Start it through npm even if the folder is under Laragon; opening the folder through Apache alone does not run Vite.
 
@@ -83,7 +83,7 @@ Apply `supabase/migrations/202610260008_pickleball.sql` after migrations 001–0
 - For **Pickleball**, select **11 points — sudden death, no deuce** (11–10 wins) or **11 points — deuce, win by two** (11–10 remains live; 12–10 wins). Win-by-two has no sports-rule score cap, so extended results such as 32–30 are valid. This follows the usual [11-point, win-by-two rule](https://www.usapickleball.org/docs/rules/USAP-Rules-Summary.pdf); sudden death is the requested custom option. Scores are stored as nonnegative PostgreSQL integers.
 - The scoreboard records points entered by the organizer; it does not track serving turns, side-outs or automatically award rally points. Both pickleball options support one game or best of three, game-win notifications, automatic next-game reset to 0–0, and explicit match finalization.
 - Admin and public player pages have a **Player records sport** selector. Wins, losses, win rate, sorting, and public match history are calculated separately for each sport using the same player identity. Public records include only finalized matches from published events. BYEs do not count; walkovers do. Bracket session results count once as session matches.
-- Games, public events, and admin event lists have sport filters and event sport labels. Public navigation is **Games → Players → Sessions → Tournaments**; the default home remains Tournaments.
+- Games, public events, and admin event lists have sport filters and event sport labels. Public navigation is **Home → Games → Players → Sessions → Tournaments**; the default home is the Qmaster overview.
 - Tournament sport/scoring choices lock when participants are registered. Session rules are chosen at creation and cannot be reclassified after registration or play, protecting historical records. Badminton retains standard 21/cap-30 and lenient first-to-31 scoring.
 
 The sport migration and both scoring modes are covered by local PostgreSQL integration and browser fixture tests; a live Supabase project still requires applying the migration and validating its deployment.
@@ -119,7 +119,7 @@ The session mode is chosen at creation. Team membership and seeds lock after bra
 
 ### Public home and event history
 
-- `/` defaults to **Tournaments**; `/?view=sessions` shows public casual sessions. Visitors can search, filter live events, browse history, and open event details without an account.
+- `/` opens **Home**. `/public/tournaments` lists tournaments and `/public/sessions` lists sessions; legacy `/?view=sessions` links redirect to the session directory while preserving filters. Visitors can search, filter live events, browse history, and open event details without an account.
 - Publish a tournament from its **Publish results** action. Published tournaments appear on the home page with bracket progress, entry counts, match completion, and champions. Draft tournaments appear as Upcoming, ongoing tournaments as Live now, and completed tournaments under History.
 - Publish a queue from **Publish session** on its admin detail page. Spectators see live courts, player/team display names, waiting order, scores, and completed match history at `/public/sessions/:id`.
 - Events stay private until explicitly published. Making an event private removes it from the directory and its public detail view on the next refresh. Private player rows, photos, rejoin preferences, and raw queue membership data remain inaccessible.

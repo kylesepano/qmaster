@@ -94,7 +94,7 @@ export function PublicTournamentPage() {
     );
   return (
     <PublicLayout live={live}>
-      <Link className="back-link" to="/">
+      <Link className="back-link" to="/public/tournaments">
         ← All tournaments
       </Link>
       {loading ? (

@@ -77,7 +77,7 @@ export function PublicSessionPage() {
       ) ?? [];
   return (
     <PublicLayout live={live}>
-      <Link className="back-link" to="/?view=sessions">
+      <Link className="back-link" to="/public/sessions">
         <ArrowLeft size={16} />
         All queue sessions
       </Link>

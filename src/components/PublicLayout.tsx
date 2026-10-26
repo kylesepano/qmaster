@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Brand } from "../layouts/AppLayout";
 import { useApp } from "../hooks/useApp";
 
@@ -11,11 +11,8 @@ export function PublicLayout({
   live?: boolean;
 }) {
   const { user } = useApp();
-  const [params] = useSearchParams();
   const location = useLocation();
-  const sessions =
-    params.get("view") === "sessions" ||
-    location.pathname.startsWith("/public/sessions/");
+  const sessions = location.pathname.startsWith("/public/sessions");
   const players = location.pathname.startsWith("/public/players");
   const games = location.pathname === "/public/games";
   return (
@@ -23,18 +20,25 @@ export function PublicLayout({
       <header className="public-header event-header">
         <Brand />
         <nav aria-label="Public navigation">
+          <Link className={location.pathname === "/" ? "active" : ""} to="/">
+            Home
+          </Link>
           <Link className={games ? "active" : ""} to="/public/games">
             Games
           </Link>
           <Link className={players ? "active" : ""} to="/public/players">
             Players
           </Link>
-          <Link className={sessions ? "active" : ""} to="/?view=sessions">
+          <Link className={sessions ? "active" : ""} to="/public/sessions">
             Sessions
           </Link>
           <Link
-            className={!sessions && !players && !games ? "active" : ""}
-            to="/"
+            className={
+              location.pathname.startsWith("/public/tournaments")
+                ? "active"
+                : ""
+            }
+            to="/public/tournaments"
           >
             Tournaments
           </Link>

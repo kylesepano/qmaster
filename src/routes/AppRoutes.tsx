@@ -14,6 +14,7 @@ import {
 } from "../pages/TournamentPages";
 import { PublicTournamentPage } from "../pages/PublicTournamentPage";
 import { PublicHomePage } from "../pages/PublicHomePage";
+import { PublicEventsPage } from "../pages/PublicEventsPage";
 import { PublicGamesPage } from "../pages/PublicGamesPage";
 import { PublicSessionPage } from "../pages/PublicSessionPage";
 import { PublicPlayersPage } from "../pages/PublicPlayersPage";
@@ -37,6 +38,8 @@ export function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<PublicHomePage />} />
       <Route path="/public/games" element={<PublicGamesPage />} />
+      <Route path="/public/sessions" element={<PublicEventsPage />} />
+      <Route path="/public/tournaments" element={<PublicEventsPage />} />
       <Route path="/public/sessions/:id" element={<PublicSessionPage />} />
       <Route path="/public/players" element={<PublicPlayersPage />} />
       <Route path="/public/players/:id" element={<PublicPlayersPage />} />

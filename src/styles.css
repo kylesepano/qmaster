@@ -3432,6 +3432,13 @@ legend {
   font-size: 38px;
   margin: 5px 0 10px;
 }
+.home-actions {
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.home-summary {
+  margin-bottom: 30px;
+}
 .spectator-hero p {
   font-size: 13px;
   color: #899ab4;

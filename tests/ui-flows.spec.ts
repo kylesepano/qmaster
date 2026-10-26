@@ -22,6 +22,70 @@ const entryId = (index: number) =>
   `70000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
 const timestamp = new Date().toISOString();
 
+test("home is a public overview with separate event directories and working legacy links", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.tournaments[0].published = true;
+  data.queueSessions[0] = {
+    ...data.queueSessions[0],
+    published: true,
+    event_date: "2030-11-03",
+    start_time: "19:30",
+  };
+  data.queueSessions.push({
+    ...data.queueSessions[0],
+    id: crypto.randomUUID(),
+    name: "Private night",
+    published: false,
+  });
+  await mockSupabase(page, { data, calls: [] }, false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Qmaster", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "On now", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Coming up", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Friday doubles", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Club singles", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Private night", exact: true }),
+  ).toHaveCount(0);
+  const nav = page.getByRole("navigation", { name: "Public navigation" });
+  await expect(
+    nav.getByRole("link", { name: "Home", exact: true }),
+  ).toHaveClass("active");
+  await expect(
+    nav.getByRole("link", { name: "Tournaments", exact: true }),
+  ).not.toHaveClass("active");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await nav.getByRole("link", { name: "Tournaments", exact: true }).click();
+  await expect(page).toHaveURL("/public/tournaments");
+  await expect(
+    page.getByRole("heading", { name: "Tournaments", exact: true }),
+  ).toBeVisible();
+  await nav.getByRole("link", { name: "Home", exact: true }).click();
+  await expect(page).toHaveURL("/");
+  await page.goto("/?view=sessions&status=upcoming");
+  await expect(page).toHaveURL("/public/sessions?status=upcoming");
+  await expect(
+    page.getByRole("heading", { name: "Friday doubles", exact: true }),
+  ).toBeVisible();
+});
+
 test("public Games navigation shows only live published matches", async ({
   page,
 }) => {
@@ -34,6 +98,7 @@ test("public Games navigation shows only live published matches", async ({
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Public navigation" });
   await expect(nav.getByRole("link")).toHaveText([
+    "Home",
     "Games",
     "Players",
     "Sessions",
@@ -1329,7 +1394,7 @@ test("workspace reset requires DELETE ALL and keeps organizer signed in", async 
   ).toBeVisible();
 });
 
-test("home defaults to public tournaments and filters live events and history without signing in", async ({
+test("public tournaments directory filters live events and history without signing in", async ({
   page,
 }) => {
   const data = fixture();
@@ -1348,7 +1413,7 @@ test("home defaults to public tournaments and filters live events and history wi
   });
   const harness: Harness = { data, calls: [] };
   await mockSupabase(page, harness, false);
-  await page.goto("/");
+  await page.goto("/public/tournaments");
   await expect(
     page.getByRole("heading", { name: "Tournaments", exact: true }),
   ).toBeVisible();
@@ -1873,7 +1938,7 @@ test("public upcoming filters show scheduled dates and times in nearest-first or
   };
   await mockSupabase(page, { data, calls: [] }, false);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/public/tournaments");
   await page.getByRole("button", { name: "Upcoming", exact: true }).click();
   await expect(page.locator(".public-event-card h2")).toHaveText([
     "Club singles",

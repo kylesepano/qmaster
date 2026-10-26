@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("home opens public tournaments and main routes load without a setup guide", async ({
+test("home opens Qmaster overview and main routes load without a setup guide", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -8,7 +8,7 @@ test("home opens public tournaments and main routes load without a setup guide",
   await page.goto("/");
   await expect(page).toHaveTitle(/Qmaster/);
   await expect(
-    page.getByRole("heading", { name: "Tournaments", exact: true }),
+    page.getByRole("heading", { name: "Qmaster", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Admin login", exact: true }),
@@ -18,6 +18,8 @@ test("home opens public tournaments and main routes load without a setup guide",
     fullPage: true,
   });
   for (const [url, heading] of [
+    ["/public/tournaments", "Tournaments"],
+    ["/public/sessions", "Queue sessions"],
     ["/players", "Your players"],
     ["/queue", "Queue sessions"],
     ["/tournaments", "Your tournaments"],
@@ -50,6 +52,7 @@ test("mobile navigation works and pages fit the viewport", async ({ page }) => {
   for (const url of [
     "/",
     "/?view=sessions",
+    "/public/tournaments",
     "/public/games",
     "/public/players",
     "/dashboard",
