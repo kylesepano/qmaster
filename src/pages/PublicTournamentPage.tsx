@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabase";
 import { BracketView, Standings } from "../components/BracketView";
 import { Badge, dateLabel, EmptyState } from "../components/ui";
 import { FORMAT_LABELS } from "../types";
+import { scoringRuleLabel } from "../utilities/scoring";
 
 export function PublicTournamentPage() {
   const { id } = useParams();
@@ -137,7 +138,8 @@ export function PublicTournamentPage() {
               )}
               <span>
                 {tournament.play_type} ·{" "}
-                {tournament.best_of === 3 ? "Best of 3" : "One game"}
+                {tournament.best_of === 3 ? "Best of 3" : "One game"} ·{" "}
+                {scoringRuleLabel(tournament.scoring_rule)}
               </span>
               <span>
                 <LockKeyhole size={14} />

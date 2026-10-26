@@ -1,4 +1,5 @@
-export type PlayType = "singles" | "doubles";
+export type PlayType = "singles" | "doubles" | "mixed";
+export type ScoringRule = "standard_21" | "lenient_31";
 export type BracketFormat =
   "single_elimination" | "double_elimination" | "round_robin";
 export type EventStatus = "draft" | "ongoing" | "completed";
@@ -23,6 +24,7 @@ export interface Tournament {
   play_type: PlayType;
   court_count: number;
   best_of: 1 | 3;
+  scoring_rule?: ScoringRule;
   format: BracketFormat;
   status: EventStatus;
   published: boolean;
@@ -70,6 +72,7 @@ export interface QueueSession {
   play_type: PlayType;
   court_count: number;
   best_of: 1 | 3;
+  scoring_rule?: ScoringRule;
   status: "ongoing" | "completed";
   created_at: string;
   published?: boolean;
@@ -84,6 +87,8 @@ export interface PublicSessionMatch {
   walkover: boolean;
   side_a: string;
   side_b: string;
+  players_a?: string[];
+  players_b?: string[];
   games: Game[];
 }
 export interface PublicSession {
@@ -92,6 +97,7 @@ export interface PublicSession {
   play_type: PlayType;
   court_count: number;
   best_of: 1 | 3;
+  scoring_rule?: ScoringRule;
   status: "ongoing" | "completed";
   created_at: string;
   waiting: { name: string; position: number }[];
@@ -115,6 +121,32 @@ export interface QueueMatch {
   completed_at: string | null;
   walkover: boolean;
   version: number;
+  team_a_name?: string | null;
+  team_b_name?: string | null;
+}
+export interface PublicPlayerMatch {
+  id: string;
+  event_id: string;
+  event_name: string;
+  kind: "tournament" | "queue";
+  play_type: PlayType;
+  completed_at: string;
+  court_no: number | null;
+  walkover: boolean;
+  side_a: string;
+  side_b: string;
+  players_a: string[];
+  players_b: string[];
+  result: "win" | "loss";
+  games: Game[];
+}
+export interface PublicPlayer {
+  id: string;
+  name: string;
+  archived: boolean;
+  wins: number;
+  losses: number;
+  matches: PublicPlayerMatch[];
 }
 export interface QueueMatchPlayer {
   match_id: string;

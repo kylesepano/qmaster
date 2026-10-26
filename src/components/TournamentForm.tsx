@@ -4,7 +4,13 @@ import { Trophy, ImagePlus, ArrowRight } from "lucide-react";
 import { useApp } from "../hooks/useApp";
 import { db, rpc } from "../services/api";
 import { uploadMedia } from "../services/media";
-import type { Tournament, PlayType, BracketFormat } from "../types";
+import type {
+  Tournament,
+  PlayType,
+  BracketFormat,
+  ScoringRule,
+} from "../types";
+import { ScoringRuleField } from "./ScoringRuleField";
 import { FORMAT_LABELS } from "../types";
 
 export function TournamentForm({
@@ -31,6 +37,9 @@ export function TournamentForm({
   const [courtCount, setCourtCount] = useState(tournament?.court_count ?? 3),
     [bestOf, setBestOf] = useState<1 | 3>(tournament?.best_of ?? 1);
   const [banner, setBanner] = useState<File | null>(null);
+  const [scoringRule, setScoringRule] = useState<ScoringRule>(
+    tournament?.scoring_rule ?? "standard_21",
+  );
   const formatLocked =
     !!tournament &&
     (tournament.status !== "draft" ||
@@ -65,6 +74,7 @@ export function TournamentForm({
               format,
               court_count: courtCount,
               best_of: bestOf,
+              scoring_rule: scoringRule,
               banner_path,
             };
             if (tournament)
@@ -174,6 +184,7 @@ export function TournamentForm({
             >
               <option value="singles">Singles · 1 vs 1</option>
               <option value="doubles">Doubles · 2 vs 2</option>
+              <option value="mixed">Mixed doubles · 2 vs 2</option>
             </select>
           </label>
           <label className="field">
@@ -183,11 +194,16 @@ export function TournamentForm({
               value={bestOf}
               onChange={(e) => setBestOf(Number(e.target.value) as 1 | 3)}
             >
-              <option value={1}>One game to 21</option>
-              <option value={3}>Best of 3 games to 21</option>
+              <option value={1}>One game</option>
+              <option value={3}>Best of 3 games</option>
             </select>
           </label>
         </div>
+        <ScoringRuleField
+          value={scoringRule}
+          onChange={setScoringRule}
+          disabled={formatLocked}
+        />
         <fieldset className="format-fieldset" disabled={formatLocked}>
           <legend>Bracket format</legend>
           <div className="format-options">
@@ -216,8 +232,10 @@ export function TournamentForm({
           </small>
         )}
         <div className="callout small-text">
-          Games go to 21, win by two, with a hard cap at 30. Brackets support
-          2–64 entries, including automatic BYEs.
+          {scoringRule === "lenient_31"
+            ? "Lenient games go to 31, with no deuce."
+            : "Standard games go to 21, win by two, capped at 30."}{" "}
+          Brackets support 2–64 entries, including automatic BYEs.
         </div>
       </section>
       <label className="field">

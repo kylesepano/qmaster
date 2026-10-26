@@ -2231,6 +2231,20 @@ legend {
   color: #49936b;
   font-size: 13px;
 }
+.score-win-notice {
+  justify-content: flex-start;
+  text-align: left;
+  margin-bottom: 22px;
+}
+.score-win-notice strong {
+  display: block;
+  line-height: 1.6;
+}
+.score-win-notice p {
+  font-size: 11px;
+  margin-top: 5px;
+  line-height: 1.7;
+}
 .settings-grid {
   margin-bottom: 25px;
   align-items: start;
@@ -3553,6 +3567,136 @@ legend {
   gap: 12px;
   font-size: 12px;
   color: #7e91ae;
+}
+.player-record {
+  display: flex;
+  gap: 20px;
+  margin: 14px 0 6px;
+  color: #91a3be;
+  font-size: 11px;
+}
+.player-record strong {
+  font-size: 18px;
+  color: #5484ac;
+  margin-right: 4px;
+}
+.player-profile-link {
+  display: flex;
+  margin-top: 15px;
+  font-size: 10px;
+}
+.public-player-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color 0.15s;
+}
+.public-player-card:hover {
+  border-color: #a7bfe9;
+}
+.public-player-card > .card-header {
+  margin-bottom: 0;
+}
+.public-player-card h2 {
+  font-size: 19px;
+  overflow-wrap: anywhere;
+}
+.public-player-card > .text-link {
+  margin-top: auto;
+  padding-top: 7px;
+}
+.public-player-record {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 8px 0;
+}
+.public-player-record > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  border-right: 1px solid var(--border);
+}
+.public-player-record > div:last-child {
+  border: 0;
+}
+.public-player-record strong {
+  font-size: 24px;
+  line-height: 1.4;
+  color: #5a7aab;
+}
+.public-player-record > div:first-child strong {
+  color: #459b7c;
+}
+.public-player-record span {
+  font-size: 10px;
+  color: #96a7c0;
+}
+.public-player-card .public-player-record {
+  gap: 9px;
+}
+.public-player-card .public-player-record strong {
+  font-size: 20px;
+}
+.public-player-card .public-player-record span {
+  font-size: 9px;
+}
+.player-history-match .card-header {
+  align-items: flex-start;
+}
+.player-history-match h3 {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.player-history-count {
+  white-space: nowrap;
+}
+.player-history-teams {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 0;
+}
+.player-history-teams > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.player-history-teams > div:last-child {
+  text-align: right;
+}
+.player-history-teams strong {
+  font-size: 13px;
+  font-weight: 550;
+  color: #647d9f;
+}
+.player-history-teams small,
+.public-team-members {
+  display: block;
+  font-size: 10px;
+  color: #a0aec1;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .public-player-record {
+    gap: 8px;
+  }
+  .public-player-record strong {
+    font-size: 22px;
+  }
+  .player-history-teams {
+    gap: 10px;
+  }
+  .player-history-teams strong {
+    font-size: 12px;
+  }
+  .player-history-match .match-card-footer {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
 }
 .section-heading h2 {
   display: flex;

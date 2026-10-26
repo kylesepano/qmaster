@@ -14,6 +14,7 @@ import {
 import { useApp } from "../hooks/useApp";
 import { rpc } from "../services/api";
 import { Scoreboard } from "../components/Scoreboard";
+import { QueueTeamNames } from "../components/QueueTeamNames";
 import type { Game, QueueMatch, TournamentMatch } from "../types";
 import { matchGames, matchSides } from "../utilities/matchDisplay";
 
@@ -416,6 +417,11 @@ export function MatchDetailPage() {
           {match.status}
         </span>
       </div>
+      {queueMatch && session?.play_type !== "singles" && (
+        <div className="button-row">
+          <QueueTeamNames match={queueMatch} />
+        </div>
+      )}
       <div className="match-meta">
         <span>
           <Grid2X2 size={17} />
@@ -517,6 +523,7 @@ export function MatchDetailPage() {
           sideB={sides[1]}
           games={games}
           bestOf={event?.best_of ?? 1}
+          scoringRule={event?.scoring_rule ?? "standard_21"}
           version={match.version}
           completed={match.status === "completed"}
           locked={match.status !== "playing" && match.status !== "completed"}

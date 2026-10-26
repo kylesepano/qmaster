@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Search,
   Plus,
@@ -22,6 +22,7 @@ import {
 } from "../components/ui";
 import type { Player } from "../types";
 import { DeleteButton } from "../components/DeleteButton";
+import { playerRecords } from "../utilities/playerRecords";
 
 export function PlayersPage() {
   const { data, user, configured, act, busy } = useApp();
@@ -34,6 +35,7 @@ export function PlayersPage() {
   const [name, setName] = useState(""),
     [photo, setPhoto] = useState<File | null>(null);
   const [removing, setRemoving] = useState<Player | null>(null);
+  const records = playerRecords(data);
   const players = data.players
     .filter(
       (p) =>
@@ -151,6 +153,15 @@ export function PlayersPage() {
                   </div>
                 </div>
                 <h3>{p.name}</h3>
+                <div className="player-record">
+                  <span>
+                    <strong>{records.get(p.id)?.wins ?? 0}</strong> Wins
+                  </span>
+                  <span>
+                    <strong>{records.get(p.id)?.losses ?? 0}</strong> Losses
+                  </span>
+                </div>
+                <small className="muted">All finalized matches</small>
                 <p>
                   {p.archived
                     ? "Archived · History preserved"
@@ -160,6 +171,12 @@ export function PlayersPage() {
                   <span className="tiny-dot" />
                   {p.archived ? "Archived" : "Active player"}
                 </span>
+                <Link
+                  className="text-link player-profile-link"
+                  to={`/public/players/${p.id}`}
+                >
+                  Public profile & history →
+                </Link>
               </article>
             ))}
           </div>

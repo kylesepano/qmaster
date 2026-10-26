@@ -38,6 +38,7 @@ import { CourtCard } from "../components/CourtCard";
 import { MatchCard } from "../components/MatchCard";
 import { generateBracket, shuffleEntries } from "../utilities/brackets";
 import { FORMAT_LABELS } from "../types";
+import { scoringRuleLabel } from "../utilities/scoring";
 import type { Entry } from "../types";
 import { DeleteButton } from "../components/DeleteButton";
 
@@ -211,6 +212,8 @@ export function TournamentDetailPage() {
     [resetting, setResetting] = useState(false),
     [publishing, setPublishing] = useState(false);
   const [removing, setRemoving] = useState<Entry | null>(null);
+  const [renaming, setRenaming] = useState<Entry | null>(null);
+  const [renamed, setRenamed] = useState("");
   const banner = useMediaUrl(tournament?.banner_path);
   if (!tournament)
     return (
@@ -241,7 +244,7 @@ export function TournamentDetailPage() {
   const available = data.players
     .filter((p) => !p.archived && !registered.has(p.id))
     .sort((a, b) => a.name.localeCompare(b.name));
-  const slots = tournament.play_type === "doubles" ? 2 : 1;
+  const slots = tournament.play_type !== "singles" ? 2 : 1;
   const champion = entries.find((e) => e.id === tournament.champion_entry_id);
   const publicUrl = `${window.location.origin}/public/tournaments/${id}`;
   async function move(index: number, delta: number) {
@@ -330,14 +333,15 @@ export function TournamentDetailPage() {
         <span>
           <UsersRound size={16} />
           {entries.length}{" "}
-          {tournament.play_type === "doubles" ? "teams" : "players"}
+          {tournament.play_type !== "singles" ? "teams" : "players"}
         </span>
         <span>
           <Grid2X2 size={16} />
           {tournament.court_count} courts
         </span>
         <span>
-          {tournament.best_of === 3 ? "Best of 3" : "One game"} · to 21
+          {tournament.best_of === 3 ? "Best of 3" : "One game"} ·{" "}
+          {scoringRuleLabel(tournament.scoring_rule)}
         </span>
         {tournament.published && (
           <Link className="text-link" to={`/public/tournaments/${id}`}>
@@ -427,7 +431,7 @@ export function TournamentDetailPage() {
                 <div>
                   <h2>
                     Registered{" "}
-                    {tournament.play_type === "doubles" ? "teams" : "players"}{" "}
+                    {tournament.play_type !== "singles" ? "teams" : "players"}{" "}
                     <span className="count-label">{entries.length}</span>
                   </h2>
                   <p>
@@ -446,7 +450,7 @@ export function TournamentDetailPage() {
                     }}
                   >
                     <Plus size={15} />
-                    Add {tournament.play_type === "doubles" ? "team" : "player"}
+                    Add {tournament.play_type !== "singles" ? "team" : "player"}
                   </button>
                 )}
               </div>
@@ -457,7 +461,7 @@ export function TournamentDetailPage() {
                       <span className="seed-number">{i + 1}</span>
                       <div>
                         <strong>{entry.name}</strong>
-                        {tournament.play_type === "doubles" && (
+                        {tournament.play_type !== "singles" && (
                           <small>
                             {entry.player_ids
                               .map(
@@ -469,6 +473,18 @@ export function TournamentDetailPage() {
                           </small>
                         )}
                       </div>
+                      {tournament.play_type !== "singles" && (
+                        <button
+                          className="icon-btn"
+                          aria-label={`Rename ${entry.name}`}
+                          onClick={() => {
+                            setRenaming(entry);
+                            setRenamed(entry.name);
+                          }}
+                        >
+                          <Pencil size={15} />
+                        </button>
+                      )}
                       {editableEntries && (
                         <div className="entry-actions">
                           <button
@@ -633,7 +649,13 @@ export function TournamentDetailPage() {
       )}
       {registering && (
         <Modal
-          title={slots === 2 ? "Register a doubles team" : "Register a player"}
+          title={
+            slots === 2
+              ? tournament.play_type === "mixed"
+                ? "Register a mixed doubles team"
+                : "Register a doubles team"
+              : "Register a player"
+          }
           onClose={() => setRegistering(false)}
         >
           <form
@@ -673,6 +695,7 @@ export function TournamentDetailPage() {
                   >
                     <input
                       type="checkbox"
+                      aria-label={p.name}
                       checked={selected.includes(p.id)}
                       disabled={
                         !selected.includes(p.id) && selected.length >= slots
@@ -685,7 +708,7 @@ export function TournamentDetailPage() {
                         )
                       }
                     />
-                    <span className="avatar small">
+                    <span className="avatar small" aria-hidden="true">
                       {p.name[0]?.toUpperCase()}
                     </span>
                     <span>{p.name}</span>
@@ -830,6 +853,53 @@ export function TournamentDetailPage() {
           This removes the entry from the draft tournament. The player records
           remain available.
         </ConfirmationDialog>
+      )}
+      {renaming && (
+        <Modal title="Rename tournament team" onClose={() => setRenaming(null)}>
+          <form
+            className="stack"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (
+                await act(
+                  () =>
+                    rpc("rename_tournament_team", {
+                      p_entry_id: renaming.id,
+                      p_name: renamed.trim(),
+                    }),
+                  "Team name updated.",
+                )
+              )
+                setRenaming(null);
+            }}
+          >
+            <label className="field">
+              Team name
+              <input
+                autoFocus
+                required
+                maxLength={150}
+                value={renamed}
+                onChange={(e) => setRenamed(e.target.value)}
+              />
+            </label>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setRenaming(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                disabled={busy || !renamed.trim()}
+              >
+                Save team name
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
       {publishing && (
         <Modal

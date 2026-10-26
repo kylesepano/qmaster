@@ -68,7 +68,7 @@ export function SettingsPage() {
             <li>
               <CheckCircle2 />
               <span>
-                <strong>Tournaments:</strong> name, date, singles/doubles,
+                <strong>Tournaments:</strong> name, date, singles/doubles/mixed,
                 bracket format, court count, and one game/best of three.
               </span>
             </li>

@@ -15,6 +15,7 @@ import {
 import { PublicTournamentPage } from "../pages/PublicTournamentPage";
 import { PublicHomePage } from "../pages/PublicHomePage";
 import { PublicSessionPage } from "../pages/PublicSessionPage";
+import { PublicPlayersPage } from "../pages/PublicPlayersPage";
 
 function Protected() {
   const { user, authLoading, configured } = useApp();
@@ -35,6 +36,8 @@ export function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<PublicHomePage />} />
       <Route path="/public/sessions/:id" element={<PublicSessionPage />} />
+      <Route path="/public/players" element={<PublicPlayersPage />} />
+      <Route path="/public/players/:id" element={<PublicPlayersPage />} />
       <Route
         path="/public/tournaments/:id"
         element={<PublicTournamentPage />}

@@ -20,6 +20,7 @@ export function matchSides(
     ];
   }
   const name = (side: "a" | "b") =>
+    (side === "a" ? match.team_a_name : match.team_b_name) ||
     data.queueMatchPlayers
       .filter((item) => item.match_id === match.id && item.side === side)
       .map(
@@ -27,7 +28,8 @@ export function matchSides(
           data.players.find((player) => player.id === item.player_id)?.name ??
           "Archived player",
       )
-      .join(" / ") || "TBD";
+      .join(" / ") ||
+    "TBD";
   return [name("a"), name("b")];
 }
 

@@ -8,14 +8,20 @@ import {
   Save,
   Trophy,
 } from "lucide-react";
-import type { Game } from "../types";
-import { evaluateMatch, gameWinner } from "../utilities/scoring";
+import type { Game, ScoringRule } from "../types";
+import {
+  evaluateMatch,
+  gameWinner,
+  prepareNextGame,
+  scoringMax,
+} from "../utilities/scoring";
 
 interface ScoreboardProps {
   sideA: string;
   sideB: string;
   games: Game[];
   bestOf: 1 | 3;
+  scoringRule?: ScoringRule;
   version: number;
   completed: boolean;
   locked?: boolean;
@@ -37,23 +43,42 @@ const cleanGames = (games: Game[]): Game[] =>
     : [{ game_no: 1, score_a: 0, score_b: 0 }];
 
 export function Scoreboard(props: ScoreboardProps) {
-  const [draft, setDraft] = useState<Game[]>(() => cleanGames(props.games));
+  const rule = props.scoringRule ?? "standard_21";
+  const maxScore = scoringMax(rule);
+  const savedGames = () =>
+    props.completed
+      ? cleanGames(props.games)
+      : prepareNextGame(cleanGames(props.games), props.bestOf, rule);
+  const [draft, setDraft] = useState<Game[]>(savedGames);
   const [quick, setQuick] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
-    setDraft(cleanGames(props.games));
+    setDraft(savedGames());
     setMessage("");
   }, [
     props.version,
+    props.bestOf,
+    rule,
+    props.completed,
     props.games
       .map((game) => `${game.game_no}:${game.score_a}:${game.score_b}`)
       .join(","),
   ]);
-  const evaluation = evaluateMatch(draft, props.bestOf);
+  const evaluation = evaluateMatch(draft, props.bestOf, rule);
   const last = draft[draft.length - 1];
-  const gameDone = gameWinner(last.score_a, last.score_b);
+  const committed = evaluateMatch(props.games, props.bestOf, rule);
+  const lastWon = [...props.games]
+    .sort((a, b) => b.game_no - a.game_no)
+    .find((game) => gameWinner(game.score_a, game.score_b, rule));
+  const gameWinnerLabel =
+    lastWon &&
+    (gameWinner(lastWon.score_a, lastWon.score_b, rule) === "a"
+      ? props.sideA
+      : props.sideB);
+  const pendingWinnerLabel =
+    committed.winner === "a" ? props.sideA : props.sideB;
   const editable = !props.locked && (!props.completed || correcting);
   const disabled = saving || props.busy || !editable;
   const winnerLabel =
@@ -72,7 +97,12 @@ export function Scoreboard(props: ScoreboardProps) {
     setSaving(true);
     setMessage("");
     try {
-      if (await props.onSave(next, finalize, walkover)) {
+      const prepared =
+        !finalize && !walkover
+          ? prepareNextGame(next, props.bestOf, rule)
+          : next;
+      if (await props.onSave(prepared, finalize, walkover)) {
+        setDraft(prepared.length ? cleanGames(prepared) : cleanGames([]));
         setMessage(finalize ? "Result saved." : "Live score saved.");
         if (finalize) setCorrecting(false);
       } else
@@ -85,21 +115,20 @@ export function Scoreboard(props: ScoreboardProps) {
   }
 
   function point(side: "a" | "b", delta: number) {
-    let next = cleanGames(draft);
-    if (gameDone && !evaluation.winner && delta > 0)
-      next = [...next, { game_no: next.length + 1, score_a: 0, score_b: 0 }];
+    if (disabled || (delta > 0 && evaluation.winner)) return;
+    const next = cleanGames(draft);
     const index = next.length - 1;
     const key = side === "a" ? "score_a" : "score_b";
     next[index] = {
       ...next[index],
-      [key]: Math.max(0, Math.min(30, next[index][key] + delta)),
+      [key]: Math.max(0, Math.min(maxScore, next[index][key] + delta)),
     };
     setDraft(next);
     void save(next, props.completed);
   }
 
   function finalize() {
-    const result = evaluateMatch(draft, props.bestOf);
+    const result = evaluateMatch(draft, props.bestOf, rule);
     if (result.error || !result.winner) {
       setMessage(
         result.error || "Finish the required games before finalizing.",
@@ -131,8 +160,10 @@ export function Scoreboard(props: ScoreboardProps) {
         <div>
           <h2>Match scoreboard</h2>
           <p className="muted">
-            {props.bestOf === 3 ? "Best of 3 games" : "Single game"} · 21 points
-            · Win by 2 · Cap at 30
+            {props.bestOf === 3 ? "Best of 3 games" : "Single game"} ·{" "}
+            {rule === "lenient_31"
+              ? "Lenient · First to 31 · No deuce"
+              : "21 points · Win by 2 · Cap at 30"}
           </p>
         </div>
         <span className="badge">
@@ -148,6 +179,36 @@ export function Scoreboard(props: ScoreboardProps) {
           </strong>
         </div>
       )}
+      {!props.completed && !committed.error && committed.winner && (
+        <div className="result-banner score-win-notice" role="status">
+          <Trophy size={22} />
+          <div>
+            <strong>
+              {pendingWinnerLabel} has won the match {committed.gamesA}–
+              {committed.gamesB}.
+            </strong>
+            <p>
+              Confirm the result with Finalize match. No more points are needed.
+            </p>
+          </div>
+        </div>
+      )}
+      {!props.completed && !committed.error && !committed.winner && lastWon && (
+        <div className="result-banner score-win-notice" role="status">
+          <Check size={22} />
+          <div>
+            <strong>
+              Game {lastWon.game_no} won by {gameWinnerLabel}, {lastWon.score_a}
+              –{lastWon.score_b}.
+            </strong>
+            <p>
+              {last.score_a === 0 && last.score_b === 0
+                ? `Game ${last.game_no} is ready at 0–0.`
+                : `Game ${last.game_no} is in progress.`}
+            </p>
+          </div>
+        </div>
+      )}
       {props.locked && !props.completed && (
         <p className="notice">
           Assign this match to a court before recording scores.
@@ -160,7 +221,9 @@ export function Scoreboard(props: ScoreboardProps) {
             key={side}
           >
             <div className="score-side-label">
-              <span className="eyebrow">Side {side.toUpperCase()}</span>
+              <span className="eyebrow">
+                Game {last.game_no} · Side {side.toUpperCase()}
+              </span>
               <h3>{side === "a" ? props.sideA : props.sideB}</h3>
             </div>
             <div className="score-controls">
@@ -203,7 +266,9 @@ export function Scoreboard(props: ScoreboardProps) {
             <strong>
               {game.score_a} – {game.score_b}
             </strong>
-            {gameWinner(game.score_a, game.score_b) && <Check size={14} />}
+            {gameWinner(game.score_a, game.score_b, rule) && (
+              <Check size={14} />
+            )}
           </div>
         ))}
       </div>
@@ -281,7 +346,7 @@ export function Scoreboard(props: ScoreboardProps) {
                         aria-label={`Game ${game.game_no}, ${sideIndex === 0 ? props.sideA : props.sideB} score`}
                         type="number"
                         min="0"
-                        max="30"
+                        max={maxScore}
                         value={game[key]}
                         disabled={disabled}
                         onChange={(event) => {
@@ -306,7 +371,12 @@ export function Scoreboard(props: ScoreboardProps) {
               {draft.length < props.bestOf && (
                 <button
                   className="btn small"
-                  disabled={disabled}
+                  disabled={
+                    disabled ||
+                    !!evaluation.error ||
+                    !!evaluation.winner ||
+                    !gameWinner(last.score_a, last.score_b, rule)
+                  }
                   onClick={() =>
                     setDraft([
                       ...draft,
@@ -351,7 +421,7 @@ export function Scoreboard(props: ScoreboardProps) {
               className="btn ghost"
               onClick={() => {
                 setCorrecting(false);
-                setDraft(cleanGames(props.games));
+                setDraft(savedGames());
               }}
             >
               Cancel correction

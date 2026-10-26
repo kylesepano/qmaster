@@ -1,5 +1,5 @@
 import { supabase } from "../lib/supabase";
-import type { AppData, Entry, PublicSession } from "../types";
+import type { AppData, Entry, PublicSession, PublicPlayer } from "../types";
 import { configured } from "../lib/supabase";
 
 export function db() {
@@ -169,4 +169,10 @@ export async function loadPublicSessions(
   return (await rpc("get_public_sessions", {
     p_session_id: id ?? null,
   })) as PublicSession[];
+}
+export async function loadPublicPlayers(id?: string): Promise<PublicPlayer[]> {
+  if (!configured) return [];
+  return (await rpc("get_public_players", {
+    p_player_id: id ?? null,
+  })) as PublicPlayer[];
 }

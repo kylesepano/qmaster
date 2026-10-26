@@ -50,6 +50,7 @@ test("mobile navigation works and pages fit the viewport", async ({ page }) => {
   for (const url of [
     "/",
     "/?view=sessions",
+    "/public/players",
     "/dashboard",
     "/players",
     "/queue",

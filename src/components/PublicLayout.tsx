@@ -16,13 +16,17 @@ export function PublicLayout({
   const sessions =
     params.get("view") === "sessions" ||
     location.pathname.startsWith("/public/sessions/");
+  const players = location.pathname.startsWith("/public/players");
   return (
     <div className="public-page">
       <header className="public-header event-header">
         <Brand />
         <nav aria-label="Public navigation">
-          <Link className={!sessions ? "active" : ""} to="/">
+          <Link className={!sessions && !players ? "active" : ""} to="/">
             Tournaments
+          </Link>
+          <Link className={players ? "active" : ""} to="/public/players">
+            Players
           </Link>
           <Link className={sessions ? "active" : ""} to="/?view=sessions">
             Queue sessions

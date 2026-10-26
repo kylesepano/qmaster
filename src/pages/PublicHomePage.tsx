@@ -13,6 +13,7 @@ import { Badge, EmptyState, dateLabel } from "../components/ui";
 import { loadPublicDirectory, loadPublicSessions } from "../services/api";
 import { usePublicData } from "../hooks/usePublicData";
 import { FORMAT_LABELS } from "../types";
+import { scoringRuleLabel } from "../utilities/scoring";
 
 export function PublicHomePage() {
   const [params, setParams] = useSearchParams();
@@ -156,7 +157,8 @@ export function PublicHomePage() {
                     <h2>{session.name}</h2>
                     <p className="muted">
                       {session.play_type} ·{" "}
-                      {session.best_of === 3 ? "Best of 3" : "One game"}
+                      {session.best_of === 3 ? "Best of 3" : "One game"} ·{" "}
+                      {scoringRuleLabel(session.scoring_rule)}
                     </p>
                     <div className="tournament-meta">
                       <span>

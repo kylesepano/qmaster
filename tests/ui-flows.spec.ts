@@ -1,7 +1,13 @@
 // Browser interaction tests use intercepted fixture responses only. They do not
 // claim to verify a live Supabase project; database integration has separate tests.
 import { test, expect, type Page } from "@playwright/test";
-import type { AppData, Game, QueueMatch, TournamentMatch } from "../src/types";
+import type {
+  AppData,
+  Game,
+  QueueMatch,
+  TournamentMatch,
+  PublicPlayer,
+} from "../src/types";
 
 const uid = "10000000-0000-4000-8000-000000000001";
 const queueId = "20000000-0000-4000-8000-000000000001";
@@ -105,6 +111,7 @@ interface Harness {
   data: AppData;
   calls: { name: string; args: Record<string, any> }[];
   conflictOnce?: boolean;
+  publicPlayers?: PublicPlayer[];
 }
 async function mockSupabase(
   page: Page,
@@ -167,6 +174,46 @@ async function mockSupabase(
       const name = path.split("/").at(-1)!;
       const args = request.postDataJSON() as Record<string, any>;
       harness.calls.push({ name, args });
+      if (name === "get_public_players") {
+        const profiles =
+          harness.publicPlayers ??
+          data.players.map((p) => ({
+            id: p.id,
+            name: p.name,
+            archived: p.archived,
+            wins: 0,
+            losses: 0,
+            matches: [],
+          }));
+        return json(
+          profiles
+            .filter((p) => !args.p_player_id || p.id === args.p_player_id)
+            .map((p) => ({ ...p, matches: args.p_player_id ? p.matches : [] })),
+        );
+      }
+      if (name === "register_entry") {
+        const entry = {
+          id: crypto.randomUUID(),
+          tournament_id: args.p_tournament_id,
+          name: args.p_name,
+          seed:
+            data.entries.filter((e) => e.tournament_id === args.p_tournament_id)
+              .length + 1,
+          player_ids: args.p_player_ids,
+        };
+        data.entries.push(entry);
+        return json(entry.id);
+      }
+      if (name === "rename_tournament_team") {
+        data.entries.find((e) => e.id === args.p_entry_id)!.name = args.p_name;
+        return json(null);
+      }
+      if (name === "rename_queue_teams") {
+        const match = data.queueMatches.find((m) => m.id === args.p_match_id)!;
+        match.team_a_name = args.p_team_a_name;
+        match.team_b_name = args.p_team_b_name;
+        return json(null);
+      }
       if (name === "get_public_sessions") {
         return json(
           data.queueSessions
@@ -181,6 +228,7 @@ async function mockSupabase(
               play_type: s.play_type,
               court_count: s.court_count,
               best_of: s.best_of,
+              scoring_rule: s.scoring_rule ?? "standard_21",
               status: s.status,
               created_at: s.created_at,
               waiting: data.queueMembers
@@ -194,20 +242,24 @@ async function mockSupabase(
                 .filter((m) => m.session_id === s.id)
                 .map((m) => ({
                   ...m,
-                  side_a: data.queueMatchPlayers
-                    .filter((p) => p.match_id === m.id && p.side === "a")
-                    .map(
-                      (p) =>
-                        data.players.find((x) => x.id === p.player_id)!.name,
-                    )
-                    .join(" / "),
-                  side_b: data.queueMatchPlayers
-                    .filter((p) => p.match_id === m.id && p.side === "b")
-                    .map(
-                      (p) =>
-                        data.players.find((x) => x.id === p.player_id)!.name,
-                    )
-                    .join(" / "),
+                  side_a:
+                    m.team_a_name ||
+                    data.queueMatchPlayers
+                      .filter((p) => p.match_id === m.id && p.side === "a")
+                      .map(
+                        (p) =>
+                          data.players.find((x) => x.id === p.player_id)!.name,
+                      )
+                      .join(" / "),
+                  side_b:
+                    m.team_b_name ||
+                    data.queueMatchPlayers
+                      .filter((p) => p.match_id === m.id && p.side === "b")
+                      .map(
+                        (p) =>
+                          data.players.find((x) => x.id === p.player_id)!.name,
+                      )
+                      .join(" / "),
                   games: data.games.filter((g) => g.queue_match_id === m.id),
                 })),
             })),
@@ -273,7 +325,7 @@ async function mockSupabase(
           data[key] = [];
         return json(null);
       }
-      if (name === "start_queue_match") {
+      if (name === "start_queue_match" || name === "start_named_queue_match") {
         const match: QueueMatch = {
           id: queueMatchId,
           session_id: args.p_session_id,
@@ -284,6 +336,8 @@ async function mockSupabase(
           completed_at: null,
           walkover: false,
           version: 0,
+          team_a_name: args.p_team_a_name ?? null,
+          team_b_name: args.p_team_b_name ?? null,
         };
         data.queueMatches.push(match);
         const ids = args.p_player_ids as string[];
@@ -399,6 +453,31 @@ async function mockSupabase(
       }
       return json(null);
     }
+    if (request.method() === "POST" && path.endsWith("/tournaments")) {
+      const values = request.postDataJSON();
+      const row = {
+        id: crypto.randomUUID(),
+        created_at: timestamp,
+        status: "draft",
+        published: false,
+        champion_entry_id: null,
+        ...values,
+      };
+      data.tournaments.push(row);
+      return json({ id: row.id });
+    }
+    if (request.method() === "POST" && path.endsWith("/queue_sessions")) {
+      const values = request.postDataJSON();
+      const row = {
+        id: crypto.randomUUID(),
+        created_at: timestamp,
+        status: "ongoing",
+        published: false,
+        ...values,
+      };
+      data.queueSessions.push(row);
+      return json({ id: row.id });
+    }
     const tables: Record<string, unknown[]> = {
       players: data.players,
       tournaments: data.tournaments,
@@ -461,11 +540,13 @@ test("doubles queue permits manual selection, saves points and final scores, the
     .click();
   await expect(page).toHaveURL(`/matches/${queueMatchId}`);
   expect(
-    harness.calls.find((call) => call.name === "start_queue_match")?.args,
+    harness.calls.find((call) => call.name === "start_named_queue_match")?.args,
   ).toEqual({
     p_session_id: queueId,
     p_player_ids: [playerId(4), playerId(1), playerId(2), playerId(3)],
     p_court_no: 1,
+    p_team_a_name: null,
+    p_team_b_name: null,
   });
   await page
     .getByRole("button", { name: "Add point to Ellis / Blair", exact: true })
@@ -532,6 +613,16 @@ test("tournament scoring recovers an optimistic conflict and completes best of t
     .getByRole("button", { name: "Save live score", exact: true })
     .click();
   await expect.poll(() => harness.data.games[0]?.score_a).toBe(21);
+  await expect(
+    page.getByText("Game 1 won by Alex, 21–18.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Game 2 is ready at 0–0.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".score-number")).toHaveText(["0", "0"]);
+  await expect(
+    page.getByLabel("Game 2, Alex score", { exact: true }),
+  ).toHaveValue("0");
   await page
     .getByRole("button", { name: "Add point to Alex", exact: true })
     .click();
@@ -544,6 +635,12 @@ test("tournament scoring recovers an optimistic conflict and completes best of t
     .getByRole("button", { name: "Save live score", exact: true })
     .click();
   await expect.poll(() => harness.data.games.length).toBe(2);
+  await expect(
+    page.getByText("Alex has won the match 2–0.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Add point to Alex", exact: true }),
+  ).toBeDisabled();
   page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Finalize match", exact: true })
@@ -881,4 +978,410 @@ test("admin publishes sessions to the home page and setup guide is removed", asy
   await expect(
     page.getByRole("heading", { name: "Clear test data" }),
   ).toBeVisible();
+});
+
+test("a game-winning live point saves the next game at zero and survives reload", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.tournamentMatches[0].status = "playing";
+  data.tournamentMatches[0].court_no = 1;
+  data.games = [
+    {
+      id: crypto.randomUUID(),
+      tournament_match_id: tournamentMatchId,
+      queue_match_id: null,
+      game_no: 1,
+      score_a: 20,
+      score_b: 19,
+    },
+  ];
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/matches/${tournamentMatchId}`);
+  await page
+    .getByRole("button", { name: "Add point to Alex", exact: true })
+    .click();
+  await expect(
+    page.getByText("Game 1 won by Alex, 21–19.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".score-number")).toHaveText(["0", "0"]);
+  expect(harness.calls.at(-1)?.args.p_games).toEqual([
+    { game_no: 1, score_a: 21, score_b: 19 },
+    { game_no: 2, score_a: 0, score_b: 0 },
+  ]);
+  await page.reload();
+  await expect(
+    page.getByText("Game 2 is ready at 0–0.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".score-number")).toHaveText(["0", "0"]);
+  await page
+    .getByRole("button", { name: "Add point to Blair", exact: true })
+    .click();
+  await expect(page.locator(".score-number")).toHaveText(["0", "1"]);
+  expect(harness.data.games.map((g) => [g.score_a, g.score_b])).toEqual([
+    [21, 19],
+    [0, 1],
+  ]);
+});
+
+test("legacy saved game wins open the next game at zero and invalid 31-point input explains the cap", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.tournamentMatches[0].status = "playing";
+  data.tournamentMatches[0].court_no = 1;
+  data.games = [
+    {
+      id: crypto.randomUUID(),
+      tournament_match_id: tournamentMatchId,
+      queue_match_id: null,
+      game_no: 1,
+      score_a: 21,
+      score_b: 23,
+    },
+  ];
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/matches/${tournamentMatchId}`);
+  await expect(
+    page.getByText("Game 1 won by Blair, 21–23.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".score-number")).toHaveText(["0", "0"]);
+  expect(harness.calls).toHaveLength(0);
+  await page
+    .getByRole("button", { name: "Quick score entry", exact: true })
+    .click();
+  await page.getByLabel("Game 2, Alex score", { exact: true }).fill("31");
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: "Standard 21-point games are capped at 30" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Save live score", exact: true }),
+  ).toBeDisabled();
+});
+
+test("mixed session accepts team names and displays them on the scoreboard and public court view", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.queueSessions[0].play_type = "mixed";
+  data.queueSessions[0].published = true;
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/queue/${queueId}`);
+  await expect(
+    page.getByRole("combobox", { name: "Side B · Player 2", exact: true }),
+  ).toHaveValue(playerId(3));
+  await page
+    .getByLabel("Team A name (optional)", { exact: true })
+    .fill("Shuttle Kings");
+  await page
+    .getByLabel("Team B name (optional)", { exact: true })
+    .fill("Net Ninjas");
+  await page
+    .getByRole("button", { name: "Call players & start match", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Shuttle Kings vs Net Ninjas",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(
+    harness.calls.find((c) => c.name === "start_named_queue_match")?.args,
+  ).toMatchObject({
+    p_team_a_name: "Shuttle Kings",
+    p_team_b_name: "Net Ninjas",
+    p_player_ids: [playerId(0), playerId(1), playerId(2), playerId(3)],
+  });
+  await page
+    .getByRole("button", { name: "Edit team names", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Team A name", { exact: true })
+    .fill("Mixed Masters");
+  await page
+    .getByRole("button", { name: "Save team names", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Mixed Masters vs Net Ninjas",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.goto(`/public/sessions/${queueId}`);
+  await expect(page.getByText("Mixed Masters", { exact: true })).toBeVisible();
+});
+
+test("mixed tournament registers and renames a named team with two members", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.tournaments[0].play_type = "mixed";
+  data.tournaments[0].status = "draft";
+  data.entries = [];
+  data.tournamentMatches = [];
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/tournaments/${tournamentId}`);
+  await page.getByRole("button", { name: "Add team", exact: true }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Register a mixed doubles team",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("dialog").getByLabel("Alex", { exact: true }).check();
+  await page.getByRole("dialog").getByLabel("Blair", { exact: true }).check();
+  await page
+    .getByLabel("Team name (optional)", { exact: true })
+    .fill("Mixed Champions");
+  await page
+    .getByRole("button", { name: "Register team", exact: true })
+    .click();
+  await expect(
+    page.getByText("Mixed Champions", { exact: true }),
+  ).toBeVisible();
+  expect(
+    harness.calls.find((c) => c.name === "register_entry")?.args,
+  ).toMatchObject({
+    p_name: "Mixed Champions",
+    p_player_ids: [playerId(0), playerId(1)],
+  });
+  await page
+    .getByRole("button", { name: "Rename Mixed Champions", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Team name", { exact: true })
+    .fill("New Champions");
+  await page
+    .getByRole("button", { name: "Save team name", exact: true })
+    .click();
+  await expect(page.getByText("New Champions", { exact: true })).toBeVisible();
+});
+
+test("public player directory and individual history display wins, losses and team names without login", async ({
+  page,
+}) => {
+  const data = fixture();
+  const publicPlayers: PublicPlayer[] = [
+    {
+      id: playerId(0),
+      name: "Alex",
+      archived: false,
+      wins: 1,
+      losses: 1,
+      matches: [
+        {
+          id: tournamentMatchId,
+          event_id: tournamentId,
+          event_name: "Mixed cup",
+          kind: "tournament",
+          play_type: "mixed",
+          completed_at: timestamp,
+          court_no: 1,
+          walkover: false,
+          side_a: "Shuttle Kings",
+          side_b: "Net Ninjas",
+          players_a: ["Alex", "Blair"],
+          players_b: ["Casey", "Drew"],
+          result: "win",
+          games: [{ game_no: 1, score_a: 21, score_b: 18 }],
+        },
+        {
+          id: queueMatchId,
+          event_id: queueId,
+          event_name: "Friday doubles",
+          kind: "queue",
+          play_type: "doubles",
+          completed_at: timestamp,
+          court_no: 2,
+          walkover: true,
+          side_a: "Shuttle Kings",
+          side_b: "Court Crew",
+          players_a: ["Alex", "Blair"],
+          players_b: ["Casey", "Drew"],
+          result: "loss",
+          games: [],
+        },
+      ],
+    },
+    {
+      id: playerId(1),
+      name: "Blair",
+      archived: false,
+      wins: 0,
+      losses: 0,
+      matches: [],
+    },
+  ];
+  const harness: Harness = { data, calls: [], publicPlayers };
+  await mockSupabase(page, harness, false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Public navigation" })
+    .getByRole("link", { name: "Players", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Players", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Admin login", exact: true }),
+  ).toBeVisible();
+  const alex = page
+    .getByRole("link")
+    .filter({ has: page.getByRole("heading", { name: "Alex", exact: true }) });
+  await expect(alex.locator(".public-player-record strong")).toHaveText([
+    "1",
+    "1",
+    "2",
+    "50%",
+  ]);
+  await alex.click();
+  await expect(
+    page.getByRole("heading", { name: "Match history", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Mixed cup", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Friday doubles", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Wins", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Friday doubles", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByText("21–18", { exact: false })).toBeVisible();
+  await page.screenshot({
+    path: "test-results/flows/public-player-mobile.png",
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Losses", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Friday doubles", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Mixed cup", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("new sessions and tournaments save the selected scoring rules", async ({
+  page,
+}) => {
+  const harness: Harness = { data: fixture(), calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto("/queue?new=1");
+  await expect(
+    page.getByRole("combobox", { name: "Scoring rules", exact: true }),
+  ).toHaveValue("standard_21");
+  await page
+    .getByLabel("Session name", { exact: true })
+    .fill("Lenient club night");
+  await page
+    .getByRole("combobox", { name: "Scoring rules", exact: true })
+    .selectOption("lenient_31");
+  await expect(
+    page.getByText(
+      "The first side to 31 wins, even at 31–30. Scores such as 31–1 are allowed. No two-point lead required.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Create session", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Lenient club night", exact: true }),
+  ).toBeVisible();
+  expect(
+    harness.data.queueSessions.find((s) => s.name === "Lenient club night")
+      ?.scoring_rule,
+  ).toBe("lenient_31");
+  await page.goto("/tournaments/new");
+  await expect(
+    page.getByRole("combobox", { name: "Scoring rules", exact: true }),
+  ).toHaveValue("standard_21");
+  await page
+    .getByLabel("Tournament name", { exact: true })
+    .fill("Lenient tournament");
+  await page
+    .getByRole("combobox", { name: "Scoring rules", exact: true })
+    .selectOption("lenient_31");
+  await page
+    .getByRole("button", { name: "Create tournament", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Lenient tournament", exact: true }),
+  ).toBeVisible();
+  expect(
+    harness.data.tournaments.find((t) => t.name === "Lenient tournament")
+      ?.scoring_rule,
+  ).toBe("lenient_31");
+});
+
+test("lenient scoreboard continues beyond 21, resets at 31, and finalizes a 31–30 result", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.tournaments[0].scoring_rule = "lenient_31";
+  data.tournamentMatches[0].status = "playing";
+  data.tournamentMatches[0].court_no = 1;
+  data.games = [
+    {
+      id: crypto.randomUUID(),
+      tournament_match_id: tournamentMatchId,
+      queue_match_id: null,
+      game_no: 1,
+      score_a: 30,
+      score_b: 1,
+    },
+  ];
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/matches/${tournamentMatchId}`);
+  await expect(
+    page.getByText("Best of 3 games · Lenient · First to 31 · No deuce", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.locator(".score-number")).toHaveText(["30", "1"]);
+  await page
+    .getByRole("button", { name: "Add point to Alex", exact: true })
+    .click();
+  await expect(
+    page.getByText("Game 1 won by Alex, 31–1.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".score-number")).toHaveText(["0", "0"]);
+  await page
+    .getByRole("button", { name: "Quick score entry", exact: true })
+    .click();
+  await page.getByLabel("Game 2, Alex score", { exact: true }).fill("31");
+  await page.getByLabel("Game 2, Blair score", { exact: true }).fill("30");
+  await page
+    .getByRole("button", { name: "Save live score", exact: true })
+    .click();
+  await expect(
+    page.getByText("Alex has won the match 2–0.", { exact: true }),
+  ).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Finalize match", exact: true })
+    .click();
+  await expect(page.getByText("Alex wins", { exact: true })).toBeVisible();
+  expect(harness.data.games.map((g) => [g.score_a, g.score_b])).toEqual([
+    [31, 1],
+    [31, 30],
+  ]);
+  await page.reload();
+  await expect(page.getByText("Alex wins", { exact: true })).toBeVisible();
 });

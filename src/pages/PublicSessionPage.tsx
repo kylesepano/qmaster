@@ -6,6 +6,7 @@ import { Badge, EmptyState, PageHeader, dateLabel } from "../components/ui";
 import { loadPublicSessions } from "../services/api";
 import { usePublicData } from "../hooks/usePublicData";
 import type { PublicSessionMatch } from "../types";
+import { scoringRuleLabel } from "../utilities/scoring";
 
 function SessionMatch({ match }: { match: PublicSessionMatch }) {
   return (
@@ -21,7 +22,16 @@ function SessionMatch({ match }: { match: PublicSessionMatch }) {
           className={`public-score-row ${match.winner_side === side ? "winner-name" : ""}`}
           key={side}
         >
-          <strong>{side === "a" ? match.side_a : match.side_b}</strong>
+          <div>
+            <strong>{side === "a" ? match.side_a : match.side_b}</strong>
+            {(side === "a" ? match.players_a : match.players_b)?.length ? (
+              <small className="public-team-members">
+                {(side === "a" ? match.players_a : match.players_b)!.join(
+                  " / ",
+                )}
+              </small>
+            ) : null}
+          </div>
           <span>
             {match.games
               .map((g) => (side === "a" ? g.score_a : g.score_b))
@@ -88,7 +98,7 @@ export function PublicSessionPage() {
         <>
           <PageHeader
             title={session.name}
-            subtitle={`${session.play_type} · ${session.best_of === 3 ? "Best of 3" : "One game"} · ${dateLabel(session.created_at)}`}
+            subtitle={`${session.play_type} · ${session.best_of === 3 ? "Best of 3" : "One game"} · ${scoringRuleLabel(session.scoring_rule)} · ${dateLabel(session.created_at)}`}
             eyebrow="QUEUE SESSION"
             actions={
               <Badge tone={session.status === "ongoing" ? "green" : ""}>

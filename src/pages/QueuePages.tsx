@@ -20,7 +20,9 @@ import {
 } from "lucide-react";
 import { useApp } from "../hooks/useApp";
 import { db, rpc } from "../services/api";
-import type { PlayType } from "../types";
+import type { PlayType, ScoringRule } from "../types";
+import { ScoringRuleField } from "../components/ScoringRuleField";
+import { scoringRuleLabel } from "../utilities/scoring";
 import {
   busyPlayerIds,
   matchGames,
@@ -39,6 +41,7 @@ export function QueueListPage() {
   const [playType, setPlayType] = useState<PlayType>("doubles");
   const [courts, setCourts] = useState(3);
   const [bestOf, setBestOf] = useState<1 | 3>(1);
+  const [scoringRule, setScoringRule] = useState<ScoringRule>("standard_21");
   const navigate = useNavigate();
   const sessions = [...data.queueSessions].sort((a, b) =>
     b.created_at.localeCompare(a.created_at),
@@ -56,6 +59,7 @@ export function QueueListPage() {
           play_type: playType,
           court_count: courts,
           best_of: bestOf,
+          scoring_rule: scoringRule,
         })
         .select("id")
         .single();
@@ -118,6 +122,7 @@ export function QueueListPage() {
               >
                 <option value="singles">Singles · 1 vs 1</option>
                 <option value="doubles">Doubles · 2 vs 2</option>
+                <option value="mixed">Mixed doubles · 2 vs 2</option>
               </select>
             </label>
             <label className="field">
@@ -144,6 +149,7 @@ export function QueueListPage() {
               </select>
             </label>
           </div>
+          <ScoringRuleField value={scoringRule} onChange={setScoringRule} />
           <div>
             <button
               className="btn primary"
@@ -190,8 +196,12 @@ export function QueueListPage() {
                   <Link to={`/queue/${session.id}`}>{session.name}</Link>
                 </h2>
                 <p className="muted">
-                  {session.play_type === "doubles" ? "Doubles" : "Singles"} ·{" "}
-                  {session.court_count} courts ·{" "}
+                  {session.play_type === "mixed"
+                    ? "Mixed doubles"
+                    : session.play_type === "doubles"
+                      ? "Doubles"
+                      : "Singles"}{" "}
+                  · {session.court_count} courts ·{" "}
                   {session.best_of === 3 ? "Best of 3" : "Single game"}
                 </p>
                 <div className="session-stats">
@@ -240,6 +250,8 @@ export function QueueDetailPage() {
   const [adding, setAdding] = useState<string[]>([]);
   const [selection, setSelection] = useState<string[]>([]);
   const [court, setCourt] = useState(1);
+  const [teamAName, setTeamAName] = useState("");
+  const [teamBName, setTeamBName] = useState("");
   const navigate = useNavigate();
   const members = data.queueMembers
     .filter((member) => member.session_id === id)
@@ -253,7 +265,7 @@ export function QueueDetailPage() {
   const eligible = waiting.filter(
     (member) => !globallyBusy.has(member.player_id),
   );
-  const slots = session?.play_type === "doubles" ? 4 : 2;
+  const slots = session?.play_type === "singles" ? 2 : 4;
   const availableCourts = Array.from(
     { length: session?.court_count ?? 0 },
     (_, index) => index + 1,
@@ -264,6 +276,14 @@ export function QueueDetailPage() {
       )
     : [];
   const choiceKey = eligible.map((member) => member.player_id).join(",");
+  const sideAKey = selection.slice(0, slots / 2).join(",");
+  const sideBKey = selection.slice(slots / 2).join(",");
+  useEffect(() => {
+    setTeamAName("");
+  }, [sideAKey]);
+  useEffect(() => {
+    setTeamBName("");
+  }, [sideBKey]);
   useEffect(() => {
     setSelection((previous) =>
       previous.length === slots &&
@@ -310,11 +330,20 @@ export function QueueDetailPage() {
     let matchId: unknown;
     if (
       await act(async () => {
-        matchId = await rpc("start_queue_match", {
-          p_session_id: id,
-          p_player_ids: selection,
-          p_court_no: court,
-        });
+        matchId = await rpc(
+          slots === 4 ? "start_named_queue_match" : "start_queue_match",
+          {
+            p_session_id: id,
+            p_player_ids: selection,
+            p_court_no: court,
+            ...(slots === 4
+              ? {
+                  p_team_a_name: teamAName.trim() || null,
+                  p_team_b_name: teamBName.trim() || null,
+                }
+              : {}),
+          },
+        );
       }, "Players called to court.")
     ) {
       setSelection([]);
@@ -330,13 +359,19 @@ export function QueueDetailPage() {
       <div className="page-header">
         <div>
           <span className="eyebrow">
-            {session.play_type === "doubles" ? "DOUBLES" : "SINGLES"} QUEUE
+            {session.play_type === "mixed"
+              ? "MIXED DOUBLES"
+              : session.play_type === "doubles"
+                ? "DOUBLES"
+                : "SINGLES"}{" "}
+            QUEUE
           </span>
           <h1>{session.name}</h1>
           <p className="muted">
             {members.length} players · {waiting.length} waiting ·{" "}
             {active.length} courts occupied
           </p>
+          <p className="muted">{scoringRuleLabel(session.scoring_rule)}</p>
         </div>
         <div className="header-actions">
           <span
@@ -548,6 +583,28 @@ export function QueueDetailPage() {
           </div>
           {session.status === "ongoing" ? (
             <form onSubmit={startMatch} className="stack">
+              {slots === 4 && (
+                <div className="form-grid">
+                  <label className="field">
+                    Team A name (optional)
+                    <input
+                      maxLength={150}
+                      placeholder="Defaults to player names"
+                      value={teamAName}
+                      onChange={(e) => setTeamAName(e.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    Team B name (optional)
+                    <input
+                      maxLength={150}
+                      placeholder="Defaults to player names"
+                      value={teamBName}
+                      onChange={(e) => setTeamBName(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
               <div className="form-grid">
                 {Array.from({ length: slots }, (_, index) => (
                   <label className="field" key={index}>

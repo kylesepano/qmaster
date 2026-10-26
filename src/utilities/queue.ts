@@ -20,7 +20,7 @@ export function suggestNextPlayers(
       seen.add(member.player_id);
       return true;
     });
-  const required = playType === "doubles" ? 4 : 2;
+  const required = playType === "singles" ? 2 : 4;
   return waiting.length >= required ? waiting.slice(0, required) : [];
 }
 
