@@ -13,6 +13,8 @@ import {
   TournamentDetailPage,
 } from "../pages/TournamentPages";
 import { PublicTournamentPage } from "../pages/PublicTournamentPage";
+import { PublicHomePage } from "../pages/PublicHomePage";
+import { PublicSessionPage } from "../pages/PublicSessionPage";
 
 function Protected() {
   const { user, authLoading, configured } = useApp();
@@ -31,6 +33,8 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/" element={<PublicHomePage />} />
+      <Route path="/public/sessions/:id" element={<PublicSessionPage />} />
       <Route
         path="/public/tournaments/:id"
         element={<PublicTournamentPage />}
@@ -53,14 +57,13 @@ export function AppRoutes() {
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route
         path="*"
         element={
           <div className="not-found">
             <h1>Out of bounds.</h1>
             <p>This page doesn’t exist.</p>
-            <a className="btn primary" href="/dashboard">
+            <a className="btn primary" href="/">
               Back to Qmaster
             </a>
           </div>

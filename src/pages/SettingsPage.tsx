@@ -1,23 +1,26 @@
+import { useState } from "react";
 import {
   CheckCircle2,
-  ExternalLink,
   Database,
-  KeyRound,
   UserRound,
   Radio,
   CloudUpload,
   ClipboardList,
+  Trash2,
 } from "lucide-react";
 import { useApp } from "../hooks/useApp";
-import { Badge, PageHeader } from "../components/ui";
+import { Badge, Modal, PageHeader } from "../components/ui";
+import { rpc } from "../services/api";
 
 export function SettingsPage() {
-  const { configured, user, live } = useApp();
+  const { configured, user, live, busy, act, data } = useApp();
+  const [clearing, setClearing] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
   return (
     <>
       <PageHeader
-        title="Settings & setup"
-        subtitle="A small setup now. A smoother game day later."
+        title="Settings"
+        subtitle="Manage your workspace and test data."
         eyebrow="YOUR WORKSPACE"
       />
       <div className="grid-2 settings-grid">
@@ -93,97 +96,92 @@ export function SettingsPage() {
           </ul>
         </section>
       </div>
-      <section className="card setup-instructions">
+      <section className="card section-block" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <div>
-            <h2>Connect Qmaster in five steps</h2>
-            <p>You only need to do this once.</p>
+            <h2>Clear test data</h2>
+            <p>Start again with an empty workspace.</p>
           </div>
-          <KeyRound size={21} />
+          <Trash2 size={20} />
         </div>
-        <ol className="setup-steps">
-          <li>
-            <span>01</span>
-            <div>
-              <h3>Create your Supabase project</h3>
-              <p>
-                Use a free project. Copy its Project URL and publishable key
-                from the project’s API settings.
-              </p>
-              <a
-                className="text-link"
-                href="https://supabase.com/dashboard"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open Supabase <ExternalLink size={13} />
-              </a>
-            </div>
-          </li>
-          <li>
-            <span>02</span>
-            <div>
-              <h3>Add two environment variables</h3>
-              <p>
-                Copy <code>.env.example</code> to <code>.env.local</code> in the
-                project folder and fill in:
-              </p>
-              <pre>
-                VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co{"\n"}
-                VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
-              </pre>
-              <p>
-                Restart <code>npm run dev</code> after saving. Use the
-                publishable key; keep secret and service-role keys out of the
-                app.
-              </p>
-            </div>
-          </li>
-          <li>
-            <span>03</span>
-            <div>
-              <h3>Create your database</h3>
-              <p>
-                Run the SQL migration files in <code>supabase/migrations/</code>{" "}
-                in filename order through Supabase’s SQL Editor. They create
-                tables, security policies, match functions, the media bucket,
-                and Realtime publication.
-              </p>
-            </div>
-          </li>
-          <li>
-            <span>04</span>
-            <div>
-              <h3>Create the organizer login</h3>
-              <p>
-                In Authentication → Users, add an email/password user and
-                confirm its email. Disable new user sign-ups in Auth settings.
-                The database automatically creates the organizer profile.
-              </p>
-              <p>
-                Set your Site URL and allowed redirect URLs to your localhost
-                address and deployed domain.
-              </p>
-            </div>
-          </li>
-          <li>
-            <span>05</span>
-            <div>
-              <h3>Sign in, then deploy when ready</h3>
-              <p>
-                Run <code>npm install</code> and <code>npm run dev</code>. On
-                Vercel, import your GitHub repository and set the same two
-                variables before deploying. The included configuration handles
-                page refreshes.
-              </p>
-              <p>
-                Check <code>README.md</code> for the complete instructions and a
-                two-device validation checklist.
-              </p>
-            </div>
-          </li>
-        </ol>
+        <p className="muted">
+          Permanently remove your players, tournaments, queue sessions, matches,
+          and scores. Active games are canceled. Your organizer login,
+          configuration, and uploaded files are kept.
+        </p>
+        <div className="form-actions">
+          <button
+            className="btn danger"
+            disabled={!configured || !user || busy}
+            onClick={() => {
+              setConfirmation("");
+              setClearing(true);
+            }}
+          >
+            <Trash2 size={16} />
+            Clear all test data
+          </button>
+        </div>
       </section>
+      {clearing && (
+        <Modal
+          title="Clear all test data?"
+          onClose={() => {
+            if (!busy) setClearing(false);
+          }}
+        >
+          <form
+            className="stack"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (confirmation !== "DELETE ALL") return;
+              if (
+                await act(
+                  () =>
+                    rpc("clear_test_data", { p_confirmation: confirmation }),
+                  "Test data cleared. Your workspace is empty.",
+                )
+              )
+                setClearing(false);
+            }}
+          >
+            <p className="muted">
+              This permanently deletes {data.players.length} players,{" "}
+              {data.tournaments.length} tournaments, {data.queueSessions.length}{" "}
+              queue sessions, and all their matches and scores from your
+              workspace. This cannot be undone. Your login and uploaded files
+              stay available.
+            </p>
+            <label className="field">
+              Type DELETE ALL to confirm
+              <input
+                autoFocus
+                autoComplete="off"
+                value={confirmation}
+                onChange={(e) => setConfirmation(e.target.value)}
+                placeholder="DELETE ALL"
+                required
+              />
+            </label>
+            <div className="form-actions">
+              <button
+                className="btn"
+                type="button"
+                disabled={busy}
+                onClick={() => setClearing(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn danger"
+                disabled={busy || confirmation !== "DELETE ALL"}
+              >
+                {busy ? "Clearing…" : "Permanently clear workspace"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
       <div className="callout">
         <CloudUpload size={18} />
         <span>

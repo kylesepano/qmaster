@@ -48,14 +48,10 @@ export function LoginPage() {
           {!configured ? (
             <div className="setup-card">
               <ShieldCheck size={26} />
-              <h3>Connect your workspace first</h3>
-              <p>
-                Add your Supabase project URL and publishable key to{" "}
-                <code>.env.local</code>, apply the migration, and create your
-                organizer account.
-              </p>
-              <Link className="btn primary" to="/settings">
-                Open setup checklist <ArrowRight size={16} />
+              <h3>Admin sign-in is unavailable</h3>
+              <p>Please contact the organizer to enable admin access.</p>
+              <Link className="btn primary" to="/">
+                View tournaments <ArrowRight size={16} />
               </Link>
             </div>
           ) : (

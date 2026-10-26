@@ -28,6 +28,8 @@ import {
 } from "../utilities/matchDisplay";
 import { suggestNextPlayers } from "../utilities/queue";
 import { CourtCard } from "../components/CourtCard";
+import { DeleteButton } from "../components/DeleteButton";
+import { PublishSessionButton } from "../components/PublishSessionButton";
 
 export function QueueListPage() {
   const { data, user, act, busy, configured } = useApp();
@@ -165,22 +167,28 @@ export function QueueListPage() {
                 match.session_id === session.id && match.status === "playing",
             ).length;
             return (
-              <Link
-                className="card session-card"
-                to={`/queue/${session.id}`}
-                key={session.id}
-              >
+              <article className="card session-card" key={session.id}>
                 <div className="card-header">
                   <span className="icon-tile">
                     <ListOrdered size={20} />
                   </span>
-                  <span
-                    className={`badge ${session.status === "ongoing" ? "green" : ""}`}
-                  >
-                    {session.status === "ongoing" ? "Active" : "Ended"}
-                  </span>
+                  <div className="button-row">
+                    <DeleteButton
+                      kind="session"
+                      id={session.id}
+                      name={session.name}
+                      compact
+                    />
+                    <span
+                      className={`badge ${session.status === "ongoing" ? "green" : ""}`}
+                    >
+                      {session.status === "ongoing" ? "Active" : "Ended"}
+                    </span>
+                  </div>
                 </div>
-                <h2>{session.name}</h2>
+                <h2>
+                  <Link to={`/queue/${session.id}`}>{session.name}</Link>
+                </h2>
                 <p className="muted">
                   {session.play_type === "doubles" ? "Doubles" : "Singles"} ·{" "}
                   {session.court_count} courts ·{" "}
@@ -196,10 +204,10 @@ export function QueueListPage() {
                     {playing} playing
                   </span>
                 </div>
-                <span className="text-link">
+                <Link to={`/queue/${session.id}`} className="text-link">
                   Open session <ArrowRight size={15} />
-                </span>
-              </Link>
+                </Link>
+              </article>
             );
           })}
         </div>
@@ -336,6 +344,13 @@ export function QueueDetailPage() {
           >
             {session.status === "ongoing" ? "Active session" : "Session ended"}
           </span>
+          <DeleteButton
+            kind="session"
+            id={session.id}
+            name={session.name}
+            onDeleted={() => navigate("/queue")}
+          />
+          <PublishSessionButton session={session} />
           {session.status === "ongoing" && (
             <button
               className="btn danger"

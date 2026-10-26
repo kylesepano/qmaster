@@ -26,7 +26,7 @@ Then complete the database/auth setup below and run:
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. Restart the dev server after changing environment variables. Without credentials, Qmaster displays its empty workspace and setup checklist; writes are unavailable. Once configured, organizer routes require sign-in.
+Open **http://127.0.0.1:5173**. The default home page is the public tournament directory, with a Queue sessions tab and an Admin login link. Restart the dev server after changing environment variables. Without credentials, public pages show empty event lists and admin sign-in is unavailable. Setup instructions live in this README; the five-step setup panel has been removed from the app. Once configured, organizer routes require sign-in.
 
 This is a Vite SPA. Start it through npm even if the folder is under Laragon; opening the folder through Apache alone does not run Vite.
 
@@ -35,7 +35,7 @@ This is a Vite SPA. Start it through npm even if the folder is under Laragon; op
 ### One-time configuration
 
 1. **Supabase Project URL** and **publishable key**, in `.env.local`. Copy them from your own Supabase project's connection/API settings. Do not use a database password, secret key, or service-role key in frontend variables.
-2. **Database migration:** paste and run [`supabase/migrations/202610260001_qmaster.sql`](supabase/migrations/202610260001_qmaster.sql) once in the SQL Editor of a new Supabase project. This creates the schema, constraints, RLS, transaction functions, private media bucket, and Realtime publication enrollment. Existing projects should be backed up and checked for conflicting table/function names first.
+2. **Database migrations:** run the SQL files in [`supabase/migrations/`](supabase/migrations/) once in filename order in the SQL Editor of a new Supabase project. The first creates the schema, constraints, RLS, transaction functions, private media bucket, and Realtime publication enrollment; `202610260002_test_data_removal.sql` adds permanent cleanup; `202610260003_public_home.sql` adds session publishing and safe public session snapshots. For an existing installation, run only migrations not already applied. Existing projects should be backed up and checked for conflicting table/function names first.
 3. **Organizer email and password:** add a user in Supabase → Authentication → Users → Add user. Confirm its email. The migration provisions the organizer record automatically for existing and new Auth users. There is no app sign-up form. Disable **Allow new users to sign up** in Supabase Auth settings.
 4. **Auth URLs:** set the Supabase Site URL and allowed redirect URLs to your localhost address and eventual deployed origin. Do not enable anonymous Auth sign-ins for spectators; public results use read-only anonymous database access.
 5. **Deployment:** create/select your GitHub repository and Vercel project, and set the same two environment variables on Vercel before building. No credentials, remote repository, or hosted deployment were created by this implementation.
@@ -66,15 +66,29 @@ You never manually enter BYEs, later-round participants, upper/lower bracket pro
 - Court occupancy is per event/session, as in the brief. Player occupancy is checked across all of the organizer's active events. If two events use the same physical court, schedule those events separately.
 - Players with references are archived when removed; match history remains. Ending a queue clears its active roster and preserves completed matches.
 
+### Public home and event history
+
+- `/` defaults to **Tournaments**; `/?view=sessions` shows public casual sessions. Visitors can search, filter live events, browse history, and open event details without an account.
+- Publish a tournament from its **Publish results** action. Published tournaments appear on the home page with bracket progress, entry counts, match completion, and champions. Draft tournaments appear as Upcoming, ongoing tournaments as Live now, and completed tournaments under History.
+- Publish a queue from **Publish session** on its admin detail page. Spectators see live courts, player/team display names, waiting order, scores, and completed match history at `/public/sessions/:id`.
+- Events stay private until explicitly published. Making an event private removes it from the directory and its public detail view on the next refresh. Private player rows, photos, rejoin preferences, and raw queue membership data remain inaccessible.
+- Public pages include an **Admin login** link. Signed-in organizers see **Admin dashboard** instead. Administration stays on the protected routes; the public home remains the default even when an organizer is signed in.
+
+### Removing test data
+
+- Use the **trash button** on a tournament or queue card, or **Delete** on its detail page. Confirming permanently removes that event, all its matches/scores and registrations/queue members, including active games. Player records remain.
+- Players have separate **Archive** and **Delete** controls. Archive preserves history and can be undone. Permanent deletion removes an unused player and their waiting-queue memberships. For a player linked to tournament registrations or match history, delete the linked tournaments/sessions first, or use the workspace reset.
+- In **Settings → Clear all test data**, type **DELETE ALL** to remove all your players, events, matches, and scores. Your organizer login, environment configuration, and uploaded Storage files remain. Other organizers are unaffected. No test data is deleted merely by installing the migration.
+
 ## Supabase security, uploads, and Realtime
 
-The migration enables RLS on every application table. Only the owning organizer can administer their data; public access is limited to explicitly published tournament details, entry display names, matches, and scores. Private player rows, queue data, and player-to-entry mappings are not publicly readable. Admin data fetching explicitly scopes records to the signed-in organizer.
+The migrations enable RLS on every application table. Only the owning organizer can administer their data. Public tournament access covers explicitly published event details, entry display names, matches, and scores. For queues, only published parent session metadata is publicly selectable; a read-only `get_public_sessions` function returns safe display names, waiting order, courts, scores, and results. Private player rows, raw queue matches/membership, and player-to-entry mappings are not publicly readable. Admin data fetching explicitly scopes records to the signed-in organizer.
 
 Critical changes use PostgreSQL transactions and organizer-level advisory locks. Version checks reject conflicting score edits. The database validates completed scores, prevents overlapping court/player assignments, and advances bracket winners and losers atomically.
 
 Optional images use private bucket `qmaster-media`, organizer UUID folders, JPG/PNG/WebP MIME types, and a 3 MiB limit. The migration creates bucket restrictions and owner-only Storage policies. Player pictures and banners are for the organizer workspace; public tournament entry names are sufficient to run results. No image is required.
 
-The migration enrolls the application tables in `supabase_realtime` if the publication exists. Check Supabase's replication/publication settings after applying it. Organizer subscriptions refresh state when players, entries, courts or scores change; public subscriptions are scoped to one tournament. The app also refetches on focus, reconnect, and periodically after lost events. See [`supabase/README.md`](supabase/README.md) for database details.
+The migration enrolls the application tables in `supabase_realtime` if the publication exists. Check Supabase's replication/publication settings after applying it. Organizer subscriptions refresh state when players, entries, courts or scores change. Public detail subscriptions are scoped to one event; the directory subscribes to its visible event type. Queue match/roster changes touch the public parent session so spectators receive updates without access to private queue tables. The app also refetches on focus, reconnect, and periodically after lost events. See [`supabase/README.md`](supabase/README.md) for database details.
 
 ## Verification
 
@@ -93,7 +107,7 @@ npm run test:e2e
 npx playwright test --config playwright.flows.config.ts
 ```
 
-The first suite checks unconfigured pages, mobile navigation, layout overflow, and setup instructions. The second starts an isolated dev server on port 5174 and intercepts test-only Supabase responses to exercise doubles queues, manual sides, per-point saves, quick scores, finalization, FIFO return, stale-version recovery, best-of-three progression, corrections, walkovers, and unauthenticated read-only public results. These fixtures never become production data.
+The first suite starts an isolated server on port 5175 and checks the public default home, unconfigured pages, mobile navigation, layout overflow, and removal of the setup panel. The second starts an isolated dev server on port 5174 and intercepts test-only Supabase responses to exercise doubles queues, manual sides, scoring, corrections, deletion/reset, public tournament/session directories and history, publishing, and read-only spectator pages. These fixtures never become production data.
 
 **Live Supabase Auth, hosted PostgreSQL, Realtime transport, uploads, and Vercel deployment have not been verified without your credentials.** Local PostgreSQL and fixture browser checks do not claim to test those hosted services.
 
@@ -104,6 +118,7 @@ After connecting your project, validate:
 3. Repeat with 6 and 10 entries to inspect BYEs, then try double elimination and a lower-bracket grand-final win to trigger a reset.
 4. Create a doubles queue with enough players for three courts. Check independent courts, busy-player exclusion, rejoin preferences, and rotation after finishing.
 5. Publish a tournament; open its public link in an incognito window or second device. Check score updates and ensure no edit controls are visible. Make it private and verify the link becomes unavailable after refresh.
+   Publish a queue session too; verify it appears on the public home, court scores refresh on another device, and its completed results remain under History after ending the session.
 6. Try an optional small image. Verify signing out blocks admin routes and unauthenticated writes fail.
 
 ## Vercel deployment
@@ -124,7 +139,7 @@ src/
   hooks/        Auth session, database state, Realtime and action feedback
   layouts/      Responsive organizer workspace
   lib/          Supabase client
-  pages/        Dashboard, players, queues, tournaments, matches, public view, setup
+  pages/        Dashboard, players, queues, tournaments, matches, public home/results, settings
   routes/       Public/protected routing
   services/     Supabase reads/RPCs and replaceable media utility
   types/        Typed domain/database entities

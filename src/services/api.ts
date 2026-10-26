@@ -1,10 +1,11 @@
 import { supabase } from "../lib/supabase";
-import type { AppData, Entry } from "../types";
+import type { AppData, Entry, PublicSession } from "../types";
+import { configured } from "../lib/supabase";
 
 export function db() {
   if (!supabase)
     throw new Error(
-      "Connect Supabase first. Follow the setup checklist in Settings.",
+      "The database connection is unavailable. See README.md for configuration.",
     );
   return supabase;
 }
@@ -136,4 +137,36 @@ export async function loadPublicTournament(id: string) {
     matches: matches as AppData["tournamentMatches"],
     games,
   };
+}
+
+export async function loadPublicDirectory() {
+  if (!configured)
+    return {
+      tournaments: [] as AppData["tournaments"],
+      entries: [] as Entry[],
+      matches: [] as AppData["tournamentMatches"],
+    };
+  const tournaments: AppData["tournaments"] = await rows(
+    "tournaments",
+    "published",
+    "true",
+  );
+  const ids = tournaments.map((t) => t.id);
+  const [entries, matches] = await Promise.all([
+    rows("tournament_entries", "tournament_id", ids),
+    rows("tournament_matches", "tournament_id", ids),
+  ]);
+  return {
+    tournaments,
+    entries: entries as Entry[],
+    matches: matches as AppData["tournamentMatches"],
+  };
+}
+export async function loadPublicSessions(
+  id?: string,
+): Promise<PublicSession[]> {
+  if (!configured) return [];
+  return (await rpc("get_public_sessions", {
+    p_session_id: id ?? null,
+  })) as PublicSession[];
 }

@@ -4,13 +4,13 @@ import {
   Search,
   Plus,
   Pencil,
-  Trash2,
   UsersRound,
   ImagePlus,
   ArchiveRestore,
+  Archive,
 } from "lucide-react";
 import { useApp } from "../hooks/useApp";
-import { db, rpc, write } from "../services/api";
+import { db, write } from "../services/api";
 import { uploadMedia } from "../services/media";
 import {
   ConfirmationDialog,
@@ -21,6 +21,7 @@ import {
   dateLabel,
 } from "../components/ui";
 import type { Player } from "../types";
+import { DeleteButton } from "../components/DeleteButton";
 
 export function PlayersPage() {
   const { data, user, configured, act, busy } = useApp();
@@ -135,12 +136,18 @@ export function PlayersPage() {
                     ) : (
                       <button
                         className="icon-btn"
-                        aria-label={`Remove ${p.name}`}
+                        aria-label={`Archive ${p.name}`}
                         onClick={() => setRemoving(p)}
                       >
-                        <Trash2 size={15} />
+                        <Archive size={15} />
                       </button>
                     )}
+                    <DeleteButton
+                      kind="player"
+                      id={p.id}
+                      name={p.name}
+                      compact
+                    />
                   </div>
                 </div>
                 <h3>{p.name}</h3>
@@ -251,21 +258,28 @@ export function PlayersPage() {
       )}
       {removing && (
         <ConfirmationDialog
-          title={`Remove ${removing.name}?`}
+          title={`Archive ${removing.name}?`}
           danger
           busy={busy}
           onClose={() => setRemoving(null)}
           onConfirm={() =>
             void act(
-              () => rpc("delete_player", { p_player_id: removing.id }),
-              "Player removed or archived to preserve existing history.",
+              () =>
+                write(
+                  db()
+                    .from("players")
+                    .update({ archived: true })
+                    .eq("id", removing.id),
+                ),
+              "Player archived. History preserved.",
             ).then((ok) => {
               if (ok) setRemoving(null);
             })
           }
         >
-          Players with history, registrations, or queue membership are archived
-          so existing games and results remain available.
+          Hide this player from active registration lists while keeping existing
+          games and results. You can restore them from the Archived players
+          filter.
         </ConfirmationDialog>
       )}
     </>

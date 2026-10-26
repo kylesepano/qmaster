@@ -6,7 +6,6 @@ import {
   Trophy,
   Swords,
   Settings,
-  ArrowUpRight,
   LogOut,
   Menu,
   X,
@@ -25,9 +24,9 @@ const links = [
   { to: "/tournaments", label: "Tournaments", icon: Trophy },
   { to: "/matches", label: "Matches & results", icon: Swords },
 ];
-export function Brand() {
+export function Brand({ to = "/" }: { to?: string }) {
   return (
-    <Link to="/dashboard" className="brand">
+    <Link to={to} className="brand">
       <img src="/favicon.svg" alt="" />
       <span>
         Qmaster<span className="brand-dot">.</span>
@@ -58,7 +57,7 @@ export function AppLayout() {
       {open && <div className="nav-scrim" onClick={() => setOpen(false)} />}
       <aside className={`sidebar ${open ? "is-open" : ""}`}>
         <div className="sidebar-brand">
-          <Brand />
+          <Brand to="/dashboard" />
           <button
             className="icon-btn mobile-only"
             onClick={() => setOpen(false)}
@@ -94,25 +93,13 @@ export function AppLayout() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-note">
-            <span className="note-icon">
-              <Trophy size={19} />
-            </span>
-            <strong>Less admin. More play.</strong>
-            <p>
-              From the first serve to the final point. Keep your game moving.
-            </p>
-            <Link to="/tournaments/new" onClick={() => setOpen(false)}>
-              Create a tournament <ArrowUpRight size={15} />
-            </Link>
-          </div>
           <NavLink
             className="nav-item"
             to="/settings"
             onClick={() => setOpen(false)}
           >
             <Settings size={19} />
-            <span>Settings & setup</span>
+            <span>Settings</span>
           </NavLink>
           <div className="sidebar-footer">
             <span className="tiny-dot" />
@@ -146,7 +133,7 @@ export function AppLayout() {
             <Link
               className="icon-btn help-button"
               to="/settings"
-              title="Setup and help"
+              title="Settings"
             >
               <CircleHelp size={19} />
             </Link>
@@ -185,8 +172,8 @@ export function AppLayout() {
                 Your workspace is ready to connect. Add your Supabase
                 credentials to start saving data.
               </span>
-              <Link to="/settings">
-                Set up Qmaster <ChevronRight size={15} />
+              <Link to="/">
+                Public homepage <ChevronRight size={15} />
               </Link>
             </div>
           )}

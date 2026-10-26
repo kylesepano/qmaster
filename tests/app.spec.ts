@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("unconfigured workspace explains setup and all main routes load", async ({
+test("home opens public tournaments and main routes load without a setup guide", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -8,10 +8,10 @@ test("unconfigured workspace explains setup and all main routes load", async ({
   await page.goto("/");
   await expect(page).toHaveTitle(/Qmaster/);
   await expect(
-    page.getByRole("heading", { name: "Let’s get the games going." }),
+    page.getByRole("heading", { name: "Tournaments", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Your workspace is ready to connect."),
+    page.getByRole("link", { name: "Admin login", exact: true }),
   ).toBeVisible();
   await page.screenshot({
     path: "test-results/qmaster-desktop.png",
@@ -23,7 +23,7 @@ test("unconfigured workspace explains setup and all main routes load", async ({
     ["/tournaments", "Your tournaments"],
     ["/tournaments/new", "Let’s build your tournament."],
     ["/matches", "Match center"],
-    ["/settings", "Settings & setup"],
+    ["/settings", "Settings"],
     ["/login", "Back in the game."],
   ]) {
     await page.goto(url);
@@ -35,20 +35,21 @@ test("unconfigured workspace explains setup and all main routes load", async ({
 });
 test("mobile navigation works and pages fit the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/dashboard");
+  await page.goto("/");
   await page.screenshot({
     path: "test-results/qmaster-mobile.png",
     fullPage: true,
   });
-  await page.getByRole("button", { name: "Open navigation" }).click();
   await page
-    .getByRole("navigation", { name: "Main navigation" })
-    .getByRole("link", { name: "Players", exact: true })
+    .getByRole("navigation", { name: "Public navigation" })
+    .getByRole("link", { name: "Queue sessions", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Your players" }),
+    page.getByRole("heading", { name: "Queue sessions", exact: true }),
   ).toBeVisible();
   for (const url of [
+    "/",
+    "/?view=sessions",
     "/dashboard",
     "/players",
     "/queue",
@@ -68,18 +69,16 @@ test("mobile navigation works and pages fit the viewport", async ({ page }) => {
     ).toBe(true);
   }
 });
-test("setup checklist lists both credentials and manual organizer requirements", async ({
+test("settings keeps reset controls and removes the five-step setup guide", async ({
   page,
 }) => {
   await page.goto("/settings");
   await expect(
-    page.getByText("VITE_SUPABASE_URL=", { exact: false }),
-  ).toBeVisible();
+    page.getByRole("heading", { name: "Connect Qmaster in five steps" }),
+  ).toHaveCount(0);
+  await expect(page.locator(".setup-steps")).toHaveCount(0);
   await expect(
-    page.getByText("VITE_SUPABASE_PUBLISHABLE_KEY=", { exact: false }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Create the organizer login" }),
+    page.getByRole("heading", { name: "Clear test data" }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "What you enter on game day" }),

@@ -167,6 +167,112 @@ async function mockSupabase(
       const name = path.split("/").at(-1)!;
       const args = request.postDataJSON() as Record<string, any>;
       harness.calls.push({ name, args });
+      if (name === "get_public_sessions") {
+        return json(
+          data.queueSessions
+            .filter(
+              (s) =>
+                s.published &&
+                (!args.p_session_id || s.id === args.p_session_id),
+            )
+            .map((s) => ({
+              id: s.id,
+              name: s.name,
+              play_type: s.play_type,
+              court_count: s.court_count,
+              best_of: s.best_of,
+              status: s.status,
+              created_at: s.created_at,
+              waiting: data.queueMembers
+                .filter((m) => m.session_id === s.id && m.status === "waiting")
+                .sort((a, b) => a.position - b.position)
+                .map((m) => ({
+                  name: data.players.find((p) => p.id === m.player_id)!.name,
+                  position: m.position,
+                })),
+              matches: data.queueMatches
+                .filter((m) => m.session_id === s.id)
+                .map((m) => ({
+                  ...m,
+                  side_a: data.queueMatchPlayers
+                    .filter((p) => p.match_id === m.id && p.side === "a")
+                    .map(
+                      (p) =>
+                        data.players.find((x) => x.id === p.player_id)!.name,
+                    )
+                    .join(" / "),
+                  side_b: data.queueMatchPlayers
+                    .filter((p) => p.match_id === m.id && p.side === "b")
+                    .map(
+                      (p) =>
+                        data.players.find((x) => x.id === p.player_id)!.name,
+                    )
+                    .join(" / "),
+                  games: data.games.filter((g) => g.queue_match_id === m.id),
+                })),
+            })),
+        );
+      }
+      if (name === "publish_queue_session") {
+        const session = data.queueSessions.find(
+          (s) => s.id === args.p_session_id,
+        )!;
+        session.published = args.p_published;
+        return json(null);
+      }
+      if (name === "delete_tournament") {
+        const ids = data.tournamentMatches
+          .filter((m) => m.tournament_id === args.p_tournament_id)
+          .map((m) => m.id);
+        data.games = data.games.filter(
+          (g) => !ids.includes(g.tournament_match_id ?? ""),
+        );
+        data.tournamentMatches = data.tournamentMatches.filter(
+          (m) => m.tournament_id !== args.p_tournament_id,
+        );
+        data.entries = data.entries.filter(
+          (e) => e.tournament_id !== args.p_tournament_id,
+        );
+        data.tournaments = data.tournaments.filter(
+          (t) => t.id !== args.p_tournament_id,
+        );
+        return json(null);
+      }
+      if (name === "delete_queue_session") {
+        const ids = data.queueMatches
+          .filter((m) => m.session_id === args.p_session_id)
+          .map((m) => m.id);
+        data.games = data.games.filter(
+          (g) => !ids.includes(g.queue_match_id ?? ""),
+        );
+        data.queueMatchPlayers = data.queueMatchPlayers.filter(
+          (p) => !ids.includes(p.match_id),
+        );
+        data.queueMatches = data.queueMatches.filter(
+          (m) => m.session_id !== args.p_session_id,
+        );
+        data.queueMembers = data.queueMembers.filter(
+          (m) => m.session_id !== args.p_session_id,
+        );
+        data.queueSessions = data.queueSessions.filter(
+          (s) => s.id !== args.p_session_id,
+        );
+        return json(null);
+      }
+      if (name === "purge_player") {
+        data.queueMembers = data.queueMembers.filter(
+          (m) => m.player_id !== args.p_player_id,
+        );
+        data.players = data.players.filter((p) => p.id !== args.p_player_id);
+        return json(null);
+      }
+      if (name === "clear_test_data") {
+        if (args.p_confirmation !== "DELETE ALL")
+          return json({ message: "Confirmation required" }, 400);
+        for (const key of Object.keys(data) as (keyof AppData)[])
+          data[key] = [];
+        return json(null);
+      }
       if (name === "start_queue_match") {
         const match: QueueMatch = {
           id: queueMatchId,
@@ -519,5 +625,260 @@ test("published results work without authentication and have no scoring controls
     page.getByRole("heading", {
       name: "This tournament is private or unavailable",
     }),
+  ).toBeVisible();
+});
+
+test("tournament deletion can be canceled and removes the event only after confirmation", async ({
+  page,
+}) => {
+  const harness: Harness = { data: fixture(), calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto("/tournaments");
+  await page
+    .getByRole("button", { name: "Delete Club singles", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Active matches will be canceled",
+  );
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(harness.calls).toHaveLength(0);
+  await page
+    .getByRole("button", { name: "Delete Club singles", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "The next trophy could be yours" }),
+  ).toBeVisible();
+  expect(harness.calls.at(-1)).toEqual({
+    name: "delete_tournament",
+    args: { p_tournament_id: tournamentId },
+  });
+  expect(harness.data.players).toHaveLength(6);
+});
+
+test("queue detail deletion redirects and players can be permanently removed", async ({
+  page,
+}) => {
+  const harness: Harness = { data: fixture(), calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/queue/${queueId}`);
+  await page
+    .getByRole("button", { name: "Delete Friday doubles", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page).toHaveURL("/queue");
+  await expect(
+    page.getByRole("heading", { name: "No queue sessions yet" }),
+  ).toBeVisible();
+  await page.goto("/players");
+  await page.getByRole("button", { name: "Delete Casey", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Casey", exact: true }),
+  ).toHaveCount(0);
+  expect(harness.calls.at(-1)).toEqual({
+    name: "purge_player",
+    args: { p_player_id: playerId(2) },
+  });
+});
+
+test("workspace reset requires DELETE ALL and keeps organizer signed in", async ({
+  page,
+}) => {
+  const harness: Harness = { data: fixture(), calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto("/settings");
+  await page
+    .getByRole("button", { name: "Clear all test data", exact: true })
+    .click();
+  const clear = page.getByRole("button", {
+    name: "Permanently clear workspace",
+    exact: true,
+  });
+  await expect(clear).toBeDisabled();
+  await page.getByLabel("Type DELETE ALL to confirm").fill("delete all");
+  await expect(clear).toBeDisabled();
+  await page.getByLabel("Type DELETE ALL to confirm").fill("DELETE ALL");
+  await clear.click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByText("Test data cleared. Your workspace is empty.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(harness.calls.at(-1)).toEqual({
+    name: "clear_test_data",
+    args: { p_confirmation: "DELETE ALL" },
+  });
+  for (const records of Object.values(harness.data))
+    expect(records).toHaveLength(0);
+  await page.goto("/dashboard");
+  await expect(
+    page.getByRole("heading", { name: "Let’s get the games going." }),
+  ).toBeVisible();
+});
+
+test("home defaults to public tournaments and filters live events and history without signing in", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.tournaments[0].published = true;
+  data.tournaments.push({
+    ...data.tournaments[0],
+    id: crypto.randomUUID(),
+    name: "Last month cup",
+    status: "completed",
+  });
+  data.tournaments.push({
+    ...data.tournaments[0],
+    id: crypto.randomUUID(),
+    name: "Private cup",
+    published: false,
+  });
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness, false);
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Tournaments", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Admin login", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Club singles", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Private cup", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Last month cup", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Club singles", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Live now", exact: true }).click();
+  await page
+    .getByRole("link")
+    .filter({
+      has: page.getByRole("heading", { name: "Club singles", exact: true }),
+    })
+    .click();
+  await expect(page).toHaveURL(`/public/tournaments/${tournamentId}`);
+  await expect(page.locator(".bracket-name").first()).toHaveText("Alex");
+  await expect(
+    page.getByRole("button", { name: /edit|finalize|delete/i }),
+  ).toHaveCount(0);
+});
+
+test("public sessions show live courts, waiting order and match history on mobile", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.queueSessions[0].published = true;
+  const match: QueueMatch = {
+    id: queueMatchId,
+    session_id: queueId,
+    status: "playing",
+    court_no: 1,
+    winner_side: null,
+    started_at: timestamp,
+    completed_at: null,
+    walkover: false,
+    version: 1,
+  };
+  data.queueMatches = [match];
+  data.queueMatchPlayers = [0, 1, 2, 3].map((i) => ({
+    match_id: match.id,
+    player_id: playerId(i),
+    side: i < 2 ? "a" : "b",
+  }));
+  for (const member of data.queueMembers.slice(0, 4)) member.status = "playing";
+  data.games = [
+    {
+      id: crypto.randomUUID(),
+      queue_match_id: match.id,
+      tournament_match_id: null,
+      game_no: 1,
+      score_a: 12,
+      score_b: 9,
+    },
+  ];
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness, false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("link", { name: "Queue sessions", exact: true }).click();
+  await page
+    .getByRole("link")
+    .filter({
+      has: page.getByRole("heading", { name: "Friday doubles", exact: true }),
+    })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Friday doubles", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Alex / Blair", { exact: true })).toBeVisible();
+  await expect(page.locator(".public-score-row").first()).toContainText("12");
+  await expect(page.locator(".public-waiting-list li").first()).toContainText(
+    "Ellis",
+  );
+  await page.screenshot({
+    path: "test-results/flows/public-session-mobile.png",
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  match.status = "completed";
+  match.winner_side = "a";
+  match.completed_at = timestamp;
+  data.queueSessions[0].status = "completed";
+  data.queueMembers = [];
+  await page.reload();
+  await expect(
+    page.getByText("Alex / Blair won", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Match history", exact: true }),
+  ).toBeVisible();
+  data.queueSessions[0].published = false;
+  await page.reload();
+  await expect(
+    page.getByRole("heading", {
+      name: "This session is private or unavailable",
+    }),
+  ).toBeVisible();
+});
+
+test("admin publishes sessions to the home page and setup guide is removed", async ({
+  page,
+}) => {
+  const harness: Harness = { data: fixture(), calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/queue/${queueId}`);
+  await page
+    .getByRole("button", { name: "Publish session", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Publish session", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Make private", exact: true }),
+  ).toBeVisible();
+  expect(harness.data.queueSessions[0].published).toBe(true);
+  await page.goto("/?view=sessions");
+  await expect(
+    page.getByRole("heading", { name: "Friday doubles", exact: true }),
+  ).toBeVisible();
+  await page.goto("/settings");
+  await expect(
+    page.getByRole("heading", { name: "Connect Qmaster in five steps" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Clear test data" }),
   ).toBeVisible();
 });

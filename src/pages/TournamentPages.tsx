@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Trophy,
   Plus,
@@ -39,6 +39,7 @@ import { MatchCard } from "../components/MatchCard";
 import { generateBracket, shuffleEntries } from "../utilities/brackets";
 import { FORMAT_LABELS } from "../types";
 import type { Entry } from "../types";
+import { DeleteButton } from "../components/DeleteButton";
 
 export function TournamentsPage() {
   const { data, configured, user } = useApp();
@@ -90,28 +91,34 @@ export function TournamentsPage() {
       {tournaments.length ? (
         <div className="grid-3">
           {tournaments.map((t) => (
-            <Link
-              className="card tournament-card"
-              key={t.id}
-              to={`/tournaments/${t.id}`}
-            >
+            <article className="card tournament-card" key={t.id}>
               <div className="card-header">
                 <span className="event-icon">
                   <Trophy size={24} />
                 </span>
-                <Badge
-                  tone={
-                    t.status === "ongoing"
-                      ? "green"
-                      : t.status === "completed"
-                        ? "blue"
-                        : ""
-                  }
-                >
-                  {t.status}
-                </Badge>
+                <div className="button-row">
+                  <DeleteButton
+                    kind="tournament"
+                    id={t.id}
+                    name={t.name}
+                    compact
+                  />
+                  <Badge
+                    tone={
+                      t.status === "ongoing"
+                        ? "green"
+                        : t.status === "completed"
+                          ? "blue"
+                          : ""
+                    }
+                  >
+                    {t.status}
+                  </Badge>
+                </div>
               </div>
-              <h2>{t.name}</h2>
+              <h2>
+                <Link to={`/tournaments/${t.id}`}>{t.name}</Link>
+              </h2>
               <p className="muted">
                 {FORMAT_LABELS[t.format]} · {t.play_type}
               </p>
@@ -139,9 +146,11 @@ export function TournamentsPage() {
                   {t.court_count} courts ·{" "}
                   {t.best_of === 3 ? "Best of 3" : "One game"}
                 </span>
-                <ArrowRight size={17} />
+                <Link className="text-link" to={`/tournaments/${t.id}`}>
+                  Open <ArrowRight size={17} />
+                </Link>
               </div>
-            </Link>
+            </article>
           ))}
         </div>
       ) : (
@@ -188,6 +197,7 @@ export function NewTournamentPage() {
 }
 
 export function TournamentDetailPage() {
+  const navigate = useNavigate();
   const { id } = useParams(),
     location = useLocation();
   const { data, loading, act, busy } = useApp();
@@ -256,6 +266,12 @@ export function TournamentDetailPage() {
         eyebrow={FORMAT_LABELS[tournament.format].toUpperCase()}
         actions={
           <>
+            <DeleteButton
+              kind="tournament"
+              id={tournament.id}
+              name={tournament.name}
+              onDeleted={() => navigate("/tournaments")}
+            />
             <button className="btn" onClick={() => setEditing(true)}>
               <Pencil size={16} />
               Edit
@@ -822,9 +838,9 @@ export function TournamentDetailPage() {
         >
           <div className="stack">
             <p className="muted">
-              Published tournaments share the event details, entry names,
-              bracket, and scores. Spectators can view results without an
-              account.
+              Published tournaments appear on the public home page with event
+              details, entry names, brackets, and scores. Players can follow
+              live progress and past results without an account.
             </p>
             {tournament.published && (
               <>

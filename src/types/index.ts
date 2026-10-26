@@ -72,6 +72,30 @@ export interface QueueSession {
   best_of: 1 | 3;
   status: "ongoing" | "completed";
   created_at: string;
+  published?: boolean;
+}
+export interface PublicSessionMatch {
+  id: string;
+  status: "playing" | "completed";
+  court_no: number;
+  started_at: string;
+  completed_at: string | null;
+  winner_side: "a" | "b" | null;
+  walkover: boolean;
+  side_a: string;
+  side_b: string;
+  games: Game[];
+}
+export interface PublicSession {
+  id: string;
+  name: string;
+  play_type: PlayType;
+  court_count: number;
+  best_of: 1 | 3;
+  status: "ongoing" | "completed";
+  created_at: string;
+  waiting: { name: string; position: number }[];
+  matches: PublicSessionMatch[];
 }
 export interface QueueMember {
   id: string;
