@@ -42,7 +42,7 @@ test("mobile navigation works and pages fit the viewport", async ({ page }) => {
   });
   await page
     .getByRole("navigation", { name: "Public navigation" })
-    .getByRole("link", { name: "Queue sessions", exact: true })
+    .getByRole("link", { name: "Sessions", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "Queue sessions", exact: true }),
@@ -50,6 +50,7 @@ test("mobile navigation works and pages fit the viewport", async ({ page }) => {
   for (const url of [
     "/",
     "/?view=sessions",
+    "/public/games",
     "/public/players",
     "/dashboard",
     "/players",

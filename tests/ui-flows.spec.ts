@@ -21,6 +21,38 @@ const entryId = (index: number) =>
   `70000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
 const timestamp = new Date().toISOString();
 
+test("public Games navigation shows only live published matches", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.tournaments[0].published = true;
+  data.tournamentMatches[0].status = "playing";
+  data.tournamentMatches[0].court_no = 2;
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness, false);
+  await page.goto("/");
+  const nav = page.getByRole("navigation", { name: "Public navigation" });
+  await expect(nav.getByRole("link")).toHaveText([
+    "Games",
+    "Players",
+    "Sessions",
+    "Tournaments",
+  ]);
+  await nav.getByRole("link", { name: "Games", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Games", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Club singles" }),
+  ).toBeVisible();
+  await expect(page.getByText("Court 2", { exact: true })).toBeVisible();
+  data.tournaments[0].published = false;
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "No live games right now" }),
+  ).toBeVisible();
+});
+
 function fixture(): AppData {
   return {
     players: ["Alex", "Blair", "Casey", "Drew", "Ellis", "Frankie"].map(
@@ -1221,7 +1253,7 @@ test("public sessions show live courts, waiting order and match history on mobil
   await mockSupabase(page, harness, false);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  await page.getByRole("link", { name: "Queue sessions", exact: true }).click();
+  await page.getByRole("link", { name: "Sessions", exact: true }).click();
   await page
     .getByRole("link")
     .filter({
