@@ -12,6 +12,8 @@ import { configured, supabase } from "../lib/supabase";
 import { loadData } from "../services/api";
 import { EMPTY_DATA } from "../types";
 import type { AppData } from "../types";
+import { ActionFeedback } from "../services/actionFeedback";
+import { flushMediaCleanup } from "../services/mediaCleanup";
 
 interface AppContextValue {
   user: User | null;
@@ -93,6 +95,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setData(EMPTY_DATA);
     void refresh();
+    void flushMediaCleanup();
     let timer: ReturnType<typeof setTimeout>;
     const channel = supabase.channel(`organizer-${user.id}`);
     for (const table of [
@@ -103,6 +106,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       "queue_sessions",
       "queue_members",
       "queue_matches",
+      "queue_teams",
     ]) {
       channel.on(
         "postgres_changes",
@@ -118,11 +122,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (status === "SUBSCRIBED") void refresh();
     });
     const interval = setInterval(() => void refresh(), 30000);
+    const cleanupInterval = setInterval(() => void flushMediaCleanup(), 60000);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {
       clearTimeout(timer);
       clearInterval(interval);
+      clearInterval(cleanupInterval);
       window.removeEventListener("focus", onFocus);
       void supabase!.removeChannel(channel);
       setLive(false);
@@ -140,8 +146,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (busy) return false;
     setBusy(true);
     try {
-      await work();
-      if (success) setNotice({ text: success, error: false });
+      const result = await work();
+      if (result instanceof ActionFeedback)
+        setNotice({ text: result.text, error: result.error });
+      else if (success) setNotice({ text: success, error: false });
       await refresh();
       return true;
     } catch (e) {

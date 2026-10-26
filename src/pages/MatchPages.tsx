@@ -33,13 +33,19 @@ export function MatchesPage() {
   const matches = all
     .filter((match) => {
       const isTournament = "tournament_id" in match;
+      const queueSessionId = isTournament
+        ? data.tournaments.find((t) => t.id === match.tournament_id)
+            ?.queue_session_id
+        : match.session_id;
       if (match.status === "skipped" || match.status === "bye") return false;
       if (status !== "all" && match.status !== status) return false;
-      if (kind !== "all" && kind !== (isTournament ? "tournament" : "queue"))
+      if (kind !== "all" && kind !== (queueSessionId ? "queue" : "tournament"))
         return false;
       if (
         event !== "all" &&
-        event !== (isTournament ? match.tournament_id : match.session_id)
+        event !==
+          (queueSessionId ||
+            (isTournament ? match.tournament_id : match.session_id))
       )
         return false;
       if (date) {
@@ -136,11 +142,13 @@ export function MatchesPage() {
             <select value={event} onChange={(e) => setEvent(e.target.value)}>
               <option value="all">All events</option>
               <optgroup label="Tournaments">
-                {data.tournaments.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
+                {data.tournaments
+                  .filter((t) => !t.queue_session_id)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
               </optgroup>
               <optgroup label="Queue sessions">
                 {data.queueSessions.map((item) => (
@@ -205,7 +213,11 @@ export function MatchesPage() {
                       ? data.queueSessions.find(
                           (item) => item.id === match.session_id,
                         )
-                      : null;
+                      : tournament?.queue_session_id
+                        ? data.queueSessions.find(
+                            (s) => s.id === tournament.queue_session_id,
+                          )
+                        : null;
                   const sides = matchSides(data, match);
                   const winner =
                     "winner_side" in match
@@ -234,9 +246,11 @@ export function MatchesPage() {
                           {tournament?.name ?? session?.name ?? "Event"}
                         </strong>
                         <small className="muted">
-                          {tournament
+                          {tournament && !tournament.queue_session_id
                             ? `Tournament · Round ${"round_no" in match ? match.round_no : ""}`
-                            : "Queue session"}
+                            : tournament?.queue_session_id
+                              ? `Session bracket · Round ${"round_no" in match ? match.round_no : ""}`
+                              : "Queue session"}
                         </small>
                       </td>
                       <td>
@@ -329,7 +343,9 @@ export function MatchDetailPage() {
     : null;
   const session = queueMatch
     ? data.queueSessions.find((item) => item.id === queueMatch.session_id)
-    : null;
+    : tournament?.queue_session_id
+      ? data.queueSessions.find((s) => s.id === tournament.queue_session_id)
+      : null;
   const event = tournament ?? session;
   const sides = matchSides(data, match);
   const games = matchGames(data, id!);
@@ -386,11 +402,13 @@ export function MatchDetailPage() {
       <Link
         className="back-link"
         to={
-          tournament
-            ? `/tournaments/${tournament.id}/bracket`
-            : session
-              ? `/queue/${session.id}`
-              : "/matches"
+          session && tournament?.queue_session_id
+            ? `/queue/${session.id}`
+            : tournament
+              ? `/tournaments/${tournament.id}/bracket`
+              : session
+                ? `/queue/${session.id}`
+                : "/matches"
         }
       >
         <ArrowLeft size={16} />
@@ -399,7 +417,11 @@ export function MatchDetailPage() {
       <div className="page-header">
         <div>
           <span className="eyebrow">
-            {tournament ? "TOURNAMENT MATCH" : "CASUAL MATCH"}
+            {tournament?.queue_session_id
+              ? "SESSION BRACKET MATCH"
+              : tournament
+                ? "TOURNAMENT MATCH"
+                : "CASUAL MATCH"}
           </span>
           <h1>
             {sides[0]} <span className="muted">vs</span> {sides[1]}

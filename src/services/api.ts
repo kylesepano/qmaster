@@ -90,6 +90,16 @@ export async function loadData(organizerId: string): Promise<AppData> {
     ),
   ]);
   const games = [...tournamentGames, ...queueGames];
+  const [rawTeams, teamPlayers] = await Promise.all([
+    rows("queue_teams", "session_id", queueIds),
+    rows("queue_team_players", "session_id", queueIds),
+  ]);
+  const queueTeams = rawTeams.map((team) => ({
+    ...team,
+    player_ids: teamPlayers
+      .filter((p) => p.team_id === team.id)
+      .map((p) => p.player_id),
+  }));
   const entries: Entry[] = rawEntries.map((e) => ({
     ...e,
     player_ids: entryPlayers
@@ -106,6 +116,7 @@ export async function loadData(organizerId: string): Promise<AppData> {
     queueMatches,
     queueMatchPlayers,
     games,
+    queueTeams,
   };
 }
 export async function loadPublicTournament(id: string) {
@@ -146,11 +157,9 @@ export async function loadPublicDirectory() {
       entries: [] as Entry[],
       matches: [] as AppData["tournamentMatches"],
     };
-  const tournaments: AppData["tournaments"] = await rows(
-    "tournaments",
-    "published",
-    "true",
-  );
+  const tournaments: AppData["tournaments"] = (
+    await rows("tournaments", "published", "true")
+  ).filter((t) => !t.queue_session_id);
   const ids = tournaments.map((t) => t.id);
   const [entries, matches] = await Promise.all([
     rows("tournament_entries", "tournament_id", ids),

@@ -49,6 +49,7 @@ export function TournamentsPage() {
   const tournaments = [...data.tournaments]
     .filter(
       (t) =>
+        !t.queue_session_id &&
         (filter === "all" || t.status === filter) &&
         t.name.toLowerCase().includes(search.toLowerCase()),
     )

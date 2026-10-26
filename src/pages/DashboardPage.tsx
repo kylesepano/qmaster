@@ -19,13 +19,17 @@ import { FORMAT_LABELS } from "../types";
 export function DashboardPage() {
   const { data } = useApp();
   const activeTournaments = data.tournaments.filter(
-    (t) => t.status === "ongoing",
+    (t) => t.status === "ongoing" && !t.queue_session_id,
   );
   const activeQueues = data.queueSessions.filter((t) => t.status === "ongoing");
   const playingT = data.tournamentMatches.filter((m) => m.status === "playing");
   const playingQ = data.queueMatches.filter((m) => m.status === "playing");
   const waiting = data.queueMembers.filter(
-    (m) => m.status === "waiting",
+    (m) =>
+      m.status === "waiting" &&
+      data.queueSessions.some(
+        (s) => s.id === m.session_id && s.mode !== "bracket",
+      ),
   ).length;
   const totalCourts = [...activeTournaments, ...activeQueues].reduce(
     (sum, e) => sum + e.court_count,
@@ -79,7 +83,7 @@ export function DashboardPage() {
     {
       label: "Active tournaments",
       value: activeTournaments.length,
-      detail: `${data.tournaments.filter((t) => t.status === "completed").length} completed tournaments`,
+      detail: `${data.tournaments.filter((t) => t.status === "completed" && !t.queue_session_id).length} completed tournaments`,
       icon: Trophy,
       color: "violet",
       to: "/tournaments",
@@ -183,7 +187,16 @@ export function DashboardPage() {
                 ...activeQueues.map((q) => ({
                   ...q,
                   path: `/queue/${q.id}`,
-                  matches: playingQ.filter((m) => m.session_id === q.id),
+                  matches: [
+                    ...playingQ.filter((m) => m.session_id === q.id),
+                    ...playingT.filter((m) =>
+                      data.tournaments.some(
+                        (t) =>
+                          t.id === m.tournament_id &&
+                          t.queue_session_id === q.id,
+                      ),
+                    ),
+                  ],
                 })),
               ].flatMap((e) =>
                 Array.from({ length: e.court_count }, (_, i) => (
@@ -286,40 +299,43 @@ export function DashboardPage() {
               View all <ArrowRight size={15} />
             </Link>
           </div>
-          {data.tournaments.length ? (
+          {data.tournaments.some((t) => !t.queue_session_id) ? (
             <div className="event-list">
-              {data.tournaments.slice(0, 3).map((t) => (
-                <Link
-                  className="event-row"
-                  to={`/tournaments/${t.id}`}
-                  key={t.id}
-                >
-                  <span className="event-icon">
-                    <Trophy size={22} />
-                  </span>
-                  <div className="event-info">
-                    <strong>{t.name}</strong>
-                    <span>
-                      <CalendarDays size={12} />
-                      {dateLabel(t.event_date)}
-                      <span>·</span>
-                      {FORMAT_LABELS[t.format]}
-                    </span>
-                  </div>
-                  <Badge
-                    tone={
-                      t.status === "ongoing"
-                        ? "green"
-                        : t.status === "completed"
-                          ? "blue"
-                          : ""
-                    }
+              {data.tournaments
+                .filter((t) => !t.queue_session_id)
+                .slice(0, 3)
+                .map((t) => (
+                  <Link
+                    className="event-row"
+                    to={`/tournaments/${t.id}`}
+                    key={t.id}
                   >
-                    {t.status}
-                  </Badge>
-                  <ChevronRight size={16} />
-                </Link>
-              ))}
+                    <span className="event-icon">
+                      <Trophy size={22} />
+                    </span>
+                    <div className="event-info">
+                      <strong>{t.name}</strong>
+                      <span>
+                        <CalendarDays size={12} />
+                        {dateLabel(t.event_date)}
+                        <span>·</span>
+                        {FORMAT_LABELS[t.format]}
+                      </span>
+                    </div>
+                    <Badge
+                      tone={
+                        t.status === "ongoing"
+                          ? "green"
+                          : t.status === "completed"
+                            ? "blue"
+                            : ""
+                      }
+                    >
+                      {t.status}
+                    </Badge>
+                    <ChevronRight size={16} />
+                  </Link>
+                ))}
             </div>
           ) : (
             <EmptyState title="A champion is waiting to be crowned">

@@ -7,6 +7,7 @@ import { loadPublicSessions } from "../services/api";
 import { usePublicData } from "../hooks/usePublicData";
 import type { PublicSessionMatch } from "../types";
 import { scoringRuleLabel } from "../utilities/scoring";
+import { BracketView, Standings } from "../components/BracketView";
 
 function SessionMatch({ match }: { match: PublicSessionMatch }) {
   return (
@@ -106,6 +107,38 @@ export function PublicSessionPage() {
               </Badge>
             }
           />
+          {session.bracket && (
+            <section className="stack section-block">
+              {session.bracket.champion_entry_id && (
+                <div className="champion-banner">
+                  <div>
+                    <span className="eyebrow">SESSION CHAMPION</span>
+                    <h2>
+                      {
+                        session.bracket.entries.find(
+                          (e) => e.id === session.bracket!.champion_entry_id,
+                        )?.name
+                      }
+                    </h2>
+                  </div>
+                </div>
+              )}
+              {session.bracket.format === "round_robin" && (
+                <Standings
+                  entries={session.bracket.entries}
+                  matches={session.bracket.matches}
+                  games={session.bracket.games}
+                  championId={session.bracket.champion_entry_id}
+                />
+              )}
+              <BracketView
+                matches={session.bracket.matches}
+                entries={session.bracket.entries}
+                games={session.bracket.games}
+                readOnly
+              />
+            </section>
+          )}
           <div className="section-heading">
             <h2>
               <Grid2X2 size={18} /> On court now
@@ -143,11 +176,28 @@ export function PublicSessionPage() {
             <div className="card-header">
               <h2>
                 <UsersRound size={18} />
-                Waiting queue
+                {session.mode === "bracket"
+                  ? "Registered entries"
+                  : "Waiting queue"}
               </h2>
-              <Badge>{session.waiting.length} players</Badge>
+              <Badge>
+                {session.mode === "bracket"
+                  ? `${session.teams?.length ?? 0} entries`
+                  : `${session.waiting.length} players`}
+              </Badge>
             </div>
-            {session.waiting.length ? (
+            {session.mode === "bracket" ? (
+              <div className="entry-list">
+                {session.teams?.map((team) => (
+                  <div className="entry-row" key={team.id}>
+                    <div>
+                      <strong>{team.name}</strong>
+                      <small>{team.players.join(" / ")}</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : session.waiting.length ? (
               <ol className="public-waiting-list">
                 {session.waiting.map((member, i) => (
                   <li key={i}>

@@ -31,6 +31,7 @@ export interface Tournament {
   banner_path: string | null;
   champion_entry_id: string | null;
   created_at: string;
+  queue_session_id?: string | null;
 }
 export interface Entry {
   id: string;
@@ -76,6 +77,15 @@ export interface QueueSession {
   status: "ongoing" | "completed";
   created_at: string;
   published?: boolean;
+  mode?: "normal" | "bracket";
+  bracket_format?: BracketFormat;
+}
+export interface QueueTeam {
+  id: string;
+  session_id: string;
+  name: string;
+  position: number;
+  player_ids: string[];
 }
 export interface PublicSessionMatch {
   id: string;
@@ -102,6 +112,17 @@ export interface PublicSession {
   created_at: string;
   waiting: { name: string; position: number }[];
   matches: PublicSessionMatch[];
+  mode?: "normal" | "bracket";
+  bracket_format?: BracketFormat;
+  teams?: { id: string; name: string; players: string[] }[];
+  bracket?: {
+    tournament_id: string;
+    format: BracketFormat;
+    champion_entry_id: string | null;
+    entries: Entry[];
+    matches: TournamentMatch[];
+    games: MatchGame[];
+  } | null;
 }
 export interface QueueMember {
   id: string;
@@ -168,6 +189,7 @@ export interface AppData {
   queueMatches: QueueMatch[];
   queueMatchPlayers: QueueMatchPlayer[];
   games: MatchGame[];
+  queueTeams?: QueueTeam[];
 }
 export const EMPTY_DATA: AppData = {
   players: [],
@@ -179,6 +201,7 @@ export const EMPTY_DATA: AppData = {
   queueMatches: [],
   queueMatchPlayers: [],
   games: [],
+  queueTeams: [],
 };
 export const FORMAT_LABELS: Record<BracketFormat, string> = {
   single_elimination: "Single elimination",

@@ -8,6 +8,7 @@ import type {
   TournamentMatch,
   PublicPlayer,
 } from "../src/types";
+import { resolveBracket } from "../src/utilities/brackets";
 
 const uid = "10000000-0000-4000-8000-000000000001";
 const queueId = "20000000-0000-4000-8000-000000000001";
@@ -112,6 +113,12 @@ interface Harness {
   calls: { name: string; args: Record<string, any> }[];
   conflictOnce?: boolean;
   publicPlayers?: PublicPlayer[];
+  mediaFiles?: { path: string; created_at: string }[];
+  mediaJobs?: { id: string; organizer_id: string; path: string }[];
+  storageRemoved?: string[];
+  storageFail?: boolean;
+  blockPurge?: boolean;
+  failPlayerSave?: boolean;
 }
 async function mockSupabase(
   page: Page,
@@ -170,10 +177,227 @@ async function mockSupabase(
       return route.fulfill({ status: 204, headers });
     if (path.startsWith("/auth/v1/")) return json(user);
     const data = harness.data;
+    function enqueue(path: string | null | undefined) {
+      if (path && !harness.mediaJobs?.some((j) => j.path === path)) {
+        harness.mediaJobs ??= [];
+        harness.mediaJobs.push({
+          id: crypto.randomUUID(),
+          organizer_id: uid,
+          path,
+        });
+      }
+    }
+    if (
+      path === "/storage/v1/object/qmaster-media" &&
+      request.method() === "DELETE"
+    ) {
+      if (harness.storageFail)
+        return json(
+          {
+            message: "Storage temporarily unavailable",
+            error: "Storage temporarily unavailable",
+            statusCode: "503",
+          },
+          503,
+        );
+      const paths = request.postDataJSON().prefixes as string[];
+      const removed = (harness.mediaFiles ?? []).filter((f) =>
+        paths.includes(f.path),
+      );
+      harness.storageRemoved ??= [];
+      harness.storageRemoved.push(...removed.map((f) => f.path));
+      harness.mediaFiles = harness.mediaFiles?.filter(
+        (f) => !paths.includes(f.path),
+      );
+      return json(
+        removed.map((f) => ({ name: f.path, id: crypto.randomUUID() })),
+      );
+    }
+    if (path === "/storage/v1/object/list/qmaster-media") {
+      const options = request.postDataJSON();
+      const prefix = `${options.prefix}/`;
+      const files = (harness.mediaFiles ?? [])
+        .filter((f) => f.path.startsWith(prefix))
+        .map((f) => ({
+          id: crypto.randomUUID(),
+          name: f.path.slice(prefix.length),
+          created_at: f.created_at,
+          updated_at: f.created_at,
+          metadata: {},
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return json(
+        files.slice(
+          options.offset ?? 0,
+          (options.offset ?? 0) + (options.limit ?? 100),
+        ),
+      );
+    }
+    if (path.startsWith("/storage/v1/object/sign/qmaster-media/"))
+      return json({
+        signedURL: "/object/sign/qmaster-media/fixture.png?token=fixture",
+      });
+    if (
+      path.startsWith("/storage/v1/object/qmaster-media/") &&
+      request.method() === "POST"
+    ) {
+      const filePath = decodeURIComponent(
+        path.split("/object/qmaster-media/")[1],
+      );
+      harness.mediaFiles ??= [];
+      harness.mediaFiles.push({
+        path: filePath,
+        created_at: new Date().toISOString(),
+      });
+      return json({ Key: `qmaster-media/${filePath}` });
+    }
+    if (path.endsWith("/media_cleanup") && request.method() === "DELETE") {
+      const id = url.searchParams.get("id")?.slice(3);
+      harness.mediaJobs = harness.mediaJobs?.filter((j) => j.id !== id);
+      return json(null);
+    }
+    if (path.endsWith("/players") && request.method() === "PATCH") {
+      if (harness.failPlayerSave)
+        return json({ message: "Player save failed" }, 409);
+      const player = data.players.find(
+        (p) => p.id === url.searchParams.get("id")?.slice(3),
+      )!;
+      const values = request.postDataJSON();
+      if ("photo_path" in values && values.photo_path !== player.photo_path)
+        enqueue(player.photo_path);
+      Object.assign(player, values);
+      return json(null);
+    }
     if (path.includes("/rpc/")) {
       const name = path.split("/").at(-1)!;
       const args = request.postDataJSON() as Record<string, any>;
       harness.calls.push({ name, args });
+      if (name === "enqueue_media_cleanup") {
+        enqueue(args.p_path);
+        return json(null);
+      }
+      if (name === "register_queue_team") {
+        const team = {
+          id: crypto.randomUUID(),
+          session_id: args.p_session_id,
+          name: args.p_name,
+          position:
+            (data.queueTeams?.filter((t) => t.session_id === args.p_session_id)
+              .length ?? 0) + 1,
+          player_ids: args.p_player_ids,
+        };
+        data.queueTeams ??= [];
+        data.queueTeams.push(team);
+        for (const id of team.player_ids as string[])
+          if (
+            !data.queueMembers.some(
+              (m) => m.session_id === team.session_id && m.player_id === id,
+            )
+          )
+            data.queueMembers.push({
+              id: crypto.randomUUID(),
+              session_id: team.session_id,
+              player_id: id,
+              position: data.queueMembers.length + 1,
+              status: "waiting",
+              rejoin: true,
+            });
+        return json(team.id);
+      }
+      if (name === "seed_queue_teams") {
+        for (const [i, id] of args.p_team_ids.entries())
+          data.queueTeams!.find((t) => t.id === id)!.position = i + 1;
+        return json(null);
+      }
+      if (name === "remove_queue_team") {
+        data.queueTeams = data.queueTeams?.filter(
+          (t) => t.id !== args.p_team_id,
+        );
+        return json(null);
+      }
+      if (name === "generate_queue_bracket") {
+        const session = data.queueSessions.find(
+          (s) => s.id === args.p_session_id,
+        )!;
+        const tid = crypto.randomUUID();
+        data.tournaments.push({
+          id: tid,
+          organizer_id: uid,
+          name: session.name,
+          event_date: timestamp.slice(0, 10),
+          venue: null,
+          description: null,
+          play_type: session.play_type,
+          court_count: session.court_count,
+          best_of: session.best_of,
+          scoring_rule: session.scoring_rule,
+          format: session.bracket_format ?? "single_elimination",
+          status: "ongoing",
+          published: !!session.published,
+          queue_session_id: session.id,
+          banner_path: null,
+          champion_entry_id: null,
+          created_at: timestamp,
+        });
+        for (const [i, id] of args.p_team_order.entries()) {
+          const team = data.queueTeams!.find((t) => t.id === id)!;
+          data.entries.push({
+            id: team.id,
+            tournament_id: tid,
+            name: team.name,
+            seed: i + 1,
+            player_ids: team.player_ids,
+          });
+        }
+        let court = 0;
+        for (const node of resolveBracket(args.p_matches)) {
+          const playing =
+            node.status === "ready" && court < session.court_count;
+          if (playing) court++;
+          data.tournamentMatches.push({
+            ...node,
+            tournament_id: tid,
+            status: playing ? "playing" : node.status,
+            court_no: playing ? court : null,
+            started_at: playing ? timestamp : null,
+            completed_at: null,
+            walkover: false,
+            version: playing ? 1 : 0,
+          });
+        }
+        return json(tid);
+      }
+      if (name === "start_registered_queue_match") {
+        const a = data.queueTeams!.find((t) => t.id === args.p_team_a_id)!,
+          b = data.queueTeams!.find((t) => t.id === args.p_team_b_id)!;
+        args.p_session_id = a.session_id;
+        args.p_player_ids = [...a.player_ids, ...b.player_ids];
+        args.p_team_a_name = a.name;
+        args.p_team_b_name = b.name;
+      }
+      if (name === "add_queue_players") {
+        let position = Math.max(
+          0,
+          ...data.queueMembers
+            .filter((m) => m.session_id === args.p_session_id)
+            .map((m) => m.position),
+        );
+        for (const id of args.p_player_ids as string[])
+          if (
+            !data.queueMembers.some(
+              (m) => m.session_id === args.p_session_id && m.player_id === id,
+            )
+          )
+            data.queueMembers.push({
+              id: crypto.randomUUID(),
+              session_id: args.p_session_id,
+              player_id: id,
+              position: ++position,
+              status: "waiting",
+              rejoin: true,
+            });
+        return json(null);
+      }
       if (name === "get_public_players") {
         const profiles =
           harness.publicPlayers ??
@@ -262,6 +486,66 @@ async function mockSupabase(
                       .join(" / "),
                   games: data.games.filter((g) => g.queue_match_id === m.id),
                 })),
+              ...(s.mode === "bracket"
+                ? (() => {
+                    const t = data.tournaments.find(
+                      (t) => t.queue_session_id === s.id,
+                    );
+                    const entries = data.entries.filter(
+                      (e) => e.tournament_id === t?.id,
+                    );
+                    const matches = data.tournamentMatches.filter(
+                      (m) => m.tournament_id === t?.id,
+                    );
+                    return {
+                      mode: s.mode,
+                      bracket_format: s.bracket_format,
+                      teams: (data.queueTeams ?? [])
+                        .filter((q) => q.session_id === s.id)
+                        .map((q) => ({
+                          id: q.id,
+                          name: q.name,
+                          players: q.player_ids.map(
+                            (id) => data.players.find((p) => p.id === id)!.name,
+                          ),
+                        })),
+                      bracket: t
+                        ? {
+                            tournament_id: t.id,
+                            format: t.format,
+                            champion_entry_id: t.champion_entry_id,
+                            entries,
+                            matches,
+                            games: data.games.filter((g) =>
+                              matches.some(
+                                (m) => m.id === g.tournament_match_id,
+                              ),
+                            ),
+                          }
+                        : null,
+                      matches: matches
+                        .filter(
+                          (m) =>
+                            m.status === "playing" || m.status === "completed",
+                        )
+                        .map((m) => ({
+                          ...m,
+                          side_a: entries.find((e) => e.id === m.entry_a_id)!
+                            .name,
+                          side_b: entries.find((e) => e.id === m.entry_b_id)!
+                            .name,
+                          winner_side: m.winner_entry_id
+                            ? m.winner_entry_id === m.entry_a_id
+                              ? "a"
+                              : "b"
+                            : null,
+                          games: data.games.filter(
+                            (g) => g.tournament_match_id === m.id,
+                          ),
+                        })),
+                    };
+                  })()
+                : {}),
             })),
         );
       }
@@ -273,6 +557,10 @@ async function mockSupabase(
         return json(null);
       }
       if (name === "delete_tournament") {
+        enqueue(
+          data.tournaments.find((t) => t.id === args.p_tournament_id)
+            ?.banner_path,
+        );
         const ids = data.tournamentMatches
           .filter((m) => m.tournament_id === args.p_tournament_id)
           .map((m) => m.id);
@@ -312,6 +600,16 @@ async function mockSupabase(
         return json(null);
       }
       if (name === "purge_player") {
+        if (harness.blockPurge)
+          return json(
+            {
+              message: "Player has match history. Delete linked events first.",
+            },
+            400,
+          );
+        enqueue(
+          data.players.find((p) => p.id === args.p_player_id)?.photo_path,
+        );
         data.queueMembers = data.queueMembers.filter(
           (m) => m.player_id !== args.p_player_id,
         );
@@ -321,11 +619,17 @@ async function mockSupabase(
       if (name === "clear_test_data") {
         if (args.p_confirmation !== "DELETE ALL")
           return json({ message: "Confirmation required" }, 400);
+        for (const player of data.players) enqueue(player.photo_path);
+        for (const t of data.tournaments) enqueue(t.banner_path);
         for (const key of Object.keys(data) as (keyof AppData)[])
           data[key] = [];
         return json(null);
       }
-      if (name === "start_queue_match" || name === "start_named_queue_match") {
+      if (
+        name === "start_queue_match" ||
+        name === "start_named_queue_match" ||
+        name === "start_registered_queue_match"
+      ) {
         const match: QueueMatch = {
           id: queueMatchId,
           session_id: args.p_session_id,
@@ -479,6 +783,16 @@ async function mockSupabase(
       return json({ id: row.id });
     }
     const tables: Record<string, unknown[]> = {
+      media_cleanup: harness.mediaJobs ?? [],
+      queue_teams: data.queueTeams ?? [],
+      queue_team_players: (data.queueTeams ?? []).flatMap((t) =>
+        t.player_ids.map((id) => ({
+          id: `${t.id}-${id}`,
+          session_id: t.session_id,
+          team_id: t.id,
+          player_id: id,
+        })),
+      ),
       players: data.players,
       tournaments: data.tournaments,
       tournament_entries: data.entries,
@@ -504,6 +818,8 @@ async function mockSupabase(
     for (const [column, filter] of url.searchParams) {
       if (filter.startsWith("eq."))
         rows = rows.filter((row) => String(row[column]) === filter.slice(3));
+      if (filter.startsWith("gt."))
+        rows = rows.filter((row) => String(row[column]) > filter.slice(3));
       if (filter.startsWith("in.(")) {
         const ids = filter
           .slice(4, -1)
@@ -1384,4 +1700,443 @@ test("lenient scoreboard continues beyond 21, resets at 31, and finalizes a 31â€
   ]);
   await page.reload();
   await expect(page.getByText("Alex wins", { exact: true })).toBeVisible();
+});
+
+test("searchable queue picker preserves selections across searches and adds many players at once", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.queueMembers = [];
+  for (let i = 0; i < 40; i++)
+    data.players.push({
+      id: crypto.randomUUID(),
+      organizer_id: uid,
+      name: `Guest ${String(i + 1).padStart(2, "0")}`,
+      photo_path: null,
+      archived: false,
+      created_at: timestamp,
+    });
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/queue/${queueId}`);
+  const picker = page.getByRole("combobox", {
+    name: "Players to add to queue",
+    exact: true,
+  });
+  await picker.fill("Guest");
+  await expect(
+    page.getByRole("option", { name: "Guest 01", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Select all matches", exact: true })
+    .click();
+  await expect(
+    page.getByText("40 players selected", { exact: true }),
+  ).toBeVisible();
+  await picker.fill("Alex");
+  await page.getByRole("option", { name: "Alex", exact: true }).click();
+  await expect(
+    page.getByText("41 players selected", { exact: true }),
+  ).toBeVisible();
+  await picker.fill("Guest 01");
+  await expect(
+    page.getByRole("option", { name: "Guest 01", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await page
+    .getByRole("button", { name: "Clear selection", exact: true })
+    .click();
+  await picker.fill("");
+  await page.getByRole("button", { name: "Select all", exact: true }).click();
+  await expect(
+    page.getByText("46 players selected", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Add 46 players", exact: true })
+    .click();
+  await expect(page.getByText("46 players", { exact: true })).toBeVisible();
+  expect(
+    harness.calls.find((c) => c.name === "add_queue_players")?.args
+      .p_player_ids,
+  ).toHaveLength(46);
+  expect(new Set(harness.data.queueMembers.map((m) => m.player_id)).size).toBe(
+    46,
+  );
+  await expect(picker).toBeDisabled();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("queue picker supports keyboard selection, deselection and no-result feedback", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.queueMembers = [];
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/queue/${queueId}`);
+  const picker = page.getByRole("combobox", {
+    name: "Players to add to queue",
+    exact: true,
+  });
+  await picker.fill("Blair");
+  await picker.press("ArrowDown");
+  await picker.press("Enter");
+  await expect(
+    page.getByText("1 player selected", { exact: true }),
+  ).toBeVisible();
+  await picker.press("Escape");
+  await expect(picker).toHaveAttribute("aria-expanded", "false");
+  await page
+    .getByRole("button", { name: "Deselect Blair", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Add players", exact: true }),
+  ).toBeDisabled();
+  await picker.fill("Nobody matches");
+  await expect(
+    page.getByText("No players match your search.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Select all matches", exact: true }),
+  ).toBeDisabled();
+});
+
+test("normal doubles session registers fixed teams and lets the admin choose a matchup", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const data = fixture();
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/queue/${queueId}`);
+  for (const [name, players] of [
+    ["Shuttle Kings", ["Alex", "Blair"]],
+    ["Net Ninjas", ["Casey", "Drew"]],
+  ] as const) {
+    await page.getByRole("button", { name: "Add team", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Team name", { exact: true }).fill(name);
+    const search = dialog.getByRole("combobox", {
+      name: "Players for session team",
+      exact: true,
+    });
+    for (const player of players) {
+      await search.fill(player);
+      await dialog.getByRole("option", { name: player, exact: true }).click();
+    }
+    await search.press("Escape");
+    await dialog
+      .getByRole("button", { name: "Register team", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  }
+  await page
+    .getByRole("combobox", { name: "Team A", exact: true })
+    .selectOption({ label: "Shuttle Kings" });
+  await page
+    .getByRole("combobox", { name: "Team B", exact: true })
+    .selectOption({ label: "Net Ninjas" });
+  await page
+    .getByRole("button", { name: "Start team match", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Shuttle Kings vs Net Ninjas",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(
+    harness.calls.some((c) => c.name === "start_registered_queue_match"),
+  ).toBe(true);
+});
+
+test("bracket session generates a random draw, assigns courts and provides a public read-only bracket", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.queueSessions[0].mode = "bracket";
+  data.queueSessions[0].bracket_format = "single_elimination";
+  data.queueSessions[0].published = true;
+  for (let i = 6; i < 8; i++)
+    data.players.push({
+      id: playerId(i),
+      organizer_id: uid,
+      name: `Extra ${i}`,
+      photo_path: null,
+      archived: false,
+      created_at: timestamp,
+    });
+  data.queueTeams = Array.from({ length: 4 }, (_, i) => ({
+    id: crypto.randomUUID(),
+    session_id: queueId,
+    name: `Registered team ${i + 1}`,
+    position: i + 1,
+    player_ids: [playerId(i * 2), playerId(i * 2 + 1)],
+  }));
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto(`/queue/${queueId}`);
+  await expect(
+    page.getByRole("checkbox", { name: "Randomize the bracket", exact: true }),
+  ).toBeChecked();
+  await page
+    .getByRole("button", {
+      name: "Generate bracket & fill courts",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Session bracket", exact: true }),
+  ).toBeVisible();
+  expect(
+    new Set(
+      harness.calls.find((c) => c.name === "generate_queue_bracket")?.args
+        .p_team_order,
+    ),
+  ).toEqual(new Set(data.queueTeams.map((t) => t.id)));
+  expect(
+    data.tournamentMatches.filter((m) => m.status === "playing"),
+  ).toHaveLength(2);
+  await expect(page.locator(".court-card.occupied")).toHaveCount(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "test-results/flows/queue-session-bracket.png",
+    fullPage: true,
+  });
+  await page.goto(`/public/sessions/${queueId}`);
+  await expect(page.locator(".bracket-match")).toHaveCount(3);
+  await expect(page.locator('a[href^="/matches/"]')).toHaveCount(0);
+  await page.goto("/tournaments");
+  await expect(
+    page.getByRole("heading", { name: "Friday doubles", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("new sessions can choose bracket mode and double elimination", async ({
+  page,
+}) => {
+  const harness: Harness = { data: fixture(), calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto("/queue?new=1");
+  await page.getByLabel("Session name", { exact: true }).fill("Bracket night");
+  await page
+    .getByRole("combobox", { name: "Session mode", exact: true })
+    .selectOption("bracket");
+  await page
+    .getByRole("combobox", { name: "Bracket format", exact: true })
+    .selectOption("double_elimination");
+  await page
+    .getByRole("button", { name: "Create session", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Bracket night", exact: true }),
+  ).toBeVisible();
+  const session = harness.data.queueSessions.find(
+    (s) => s.name === "Bracket night",
+  );
+  expect(session).toMatchObject({
+    mode: "bracket",
+    bracket_format: "double_elimination",
+  });
+});
+
+test("permanent player deletion removes the photo through Storage only after the record deletion succeeds", async ({
+  page,
+}) => {
+  const data = fixture();
+  const photo = `${uid}/casey.jpg`,
+    keep = `${uid}/alex.jpg`;
+  data.players[2].photo_path = photo;
+  data.players[0].photo_path = keep;
+  const old = new Date(Date.now() - 3600000).toISOString();
+  const harness: Harness = {
+    data,
+    calls: [],
+    blockPurge: true,
+    mediaFiles: [
+      { path: photo, created_at: old },
+      { path: keep, created_at: old },
+    ],
+  };
+  await mockSupabase(page, harness);
+  await page.goto("/players");
+  await page.getByRole("button", { name: "Delete Casey", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Player has match history",
+  );
+  expect(harness.storageRemoved ?? []).toEqual([]);
+  expect(harness.mediaJobs ?? []).toEqual([]);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  harness.blockPurge = false;
+  await page.getByRole("button", { name: "Delete Casey", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Casey", exact: true }),
+  ).toHaveCount(0);
+  expect(harness.storageRemoved).toEqual([photo]);
+  expect(harness.mediaJobs).toEqual([]);
+  expect(harness.mediaFiles?.map((f) => f.path)).toEqual([keep]);
+});
+
+test("failed photo deletion is retained for retry and cleanup removes old orphans while preserving active and recent images", async ({
+  page,
+}) => {
+  const data = fixture();
+  const photo = `${uid}/casey.jpg`,
+    keep = `${uid}/alex.jpg`,
+    orphan = `${uid}/orphan.jpg`,
+    recent = `${uid}/uploading.png`,
+    outside = "another-owner/private.jpg";
+  data.players[2].photo_path = photo;
+  data.players[0].photo_path = keep;
+  const old = new Date(Date.now() - 3600000).toISOString(),
+    now = new Date().toISOString();
+  const harness: Harness = {
+    data,
+    calls: [],
+    storageFail: true,
+    mediaFiles: [
+      { path: photo, created_at: now },
+      { path: keep, created_at: old },
+      { path: orphan, created_at: old },
+      { path: recent, created_at: now },
+      { path: outside, created_at: old },
+    ],
+  };
+  await mockSupabase(page, harness);
+  await page.goto("/players");
+  await page.getByRole("button", { name: "Delete Casey", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Casey", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("alert")).toContainText(
+    "Image cleanup is pending",
+  );
+  expect(harness.mediaJobs?.map((j) => j.path)).toEqual([photo]);
+  harness.storageFail = false;
+  await page.goto("/settings");
+  await page
+    .getByRole("button", { name: "Clean unused images", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Image cleanup finished.",
+  );
+  expect(new Set(harness.storageRemoved)).toEqual(new Set([photo, orphan]));
+  expect(new Set(harness.mediaFiles?.map((f) => f.path))).toEqual(
+    new Set([keep, recent, outside]),
+  );
+  expect(harness.mediaJobs).toEqual([]);
+});
+
+test("replacing a player photo removes the previous image after the new photo saves", async ({
+  page,
+}) => {
+  const data = fixture();
+  const photo = `${uid}/old-photo.jpg`;
+  data.players[2].photo_path = photo;
+  const harness: Harness = {
+    data,
+    calls: [],
+    mediaFiles: [
+      { path: photo, created_at: new Date(Date.now() - 3600000).toISOString() },
+    ],
+  };
+  await mockSupabase(page, harness);
+  await page.goto("/players");
+  await page.getByRole("button", { name: "Edit Casey", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .locator("input[type=file]")
+    .setInputFiles({
+      name: "replacement.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aK0sAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(data.players[2].photo_path).not.toBe(photo);
+  expect(harness.mediaFiles?.map((f) => f.path)).toEqual([
+    data.players[2].photo_path,
+  ]);
+  expect(harness.storageRemoved).toEqual([photo]);
+});
+
+test("failed player updates discard the new upload and preserve the original photo", async ({
+  page,
+}) => {
+  const data = fixture();
+  const photo = `${uid}/keep-original.jpg`;
+  data.players[2].photo_path = photo;
+  const harness: Harness = {
+    data,
+    calls: [],
+    failPlayerSave: true,
+    mediaFiles: [
+      { path: photo, created_at: new Date(Date.now() - 3600000).toISOString() },
+    ],
+  };
+  await mockSupabase(page, harness);
+  await page.goto("/players");
+  await page.getByRole("button", { name: "Edit Casey", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .locator("input[type=file]")
+    .setInputFiles({
+      name: "replacement.png",
+      mimeType: "image/png",
+      buffer: Buffer.from("fixture image"),
+    });
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Player save failed");
+  expect(data.players[2].photo_path).toBe(photo);
+  expect(harness.mediaFiles?.map((f) => f.path)).toEqual([photo]);
+  expect(harness.storageRemoved).toHaveLength(1);
+  expect(harness.storageRemoved?.[0]).not.toBe(photo);
+});
+
+test("a shared photo is kept until its last player reference is deleted", async ({
+  page,
+}) => {
+  const data = fixture();
+  const photo = `${uid}/shared.jpg`;
+  data.players[2].photo_path = photo;
+  data.players[4].photo_path = photo;
+  const harness: Harness = {
+    data,
+    calls: [],
+    mediaFiles: [
+      { path: photo, created_at: new Date(Date.now() - 3600000).toISOString() },
+    ],
+  };
+  await mockSupabase(page, harness);
+  await page.goto("/players");
+  await page.getByRole("button", { name: "Delete Casey", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Casey", exact: true }),
+  ).toHaveCount(0);
+  expect(harness.storageRemoved ?? []).toHaveLength(0);
+  expect(harness.mediaJobs).toHaveLength(1);
+  await page.getByRole("button", { name: "Delete Ellis", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Ellis", exact: true }),
+  ).toHaveCount(0);
+  expect(harness.storageRemoved).toEqual([photo]);
+  expect(harness.mediaJobs).toEqual([]);
 });

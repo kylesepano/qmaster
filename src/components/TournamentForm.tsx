@@ -4,6 +4,7 @@ import { Trophy, ImagePlus, ArrowRight } from "lucide-react";
 import { useApp } from "../hooks/useApp";
 import { db, rpc } from "../services/api";
 import { uploadMedia } from "../services/media";
+import { cleanupFeedback, discardUpload } from "../services/mediaCleanup";
 import type {
   Tournament,
   PlayType,
@@ -77,20 +78,30 @@ export function TournamentForm({
               scoring_rule: scoringRule,
               banner_path,
             };
-            if (tournament)
-              await rpc("update_tournament", {
-                p_tournament_id: tournament.id,
-                p_details: values,
-              });
-            else {
-              const { data, error } = await db()
-                .from("tournaments")
-                .insert({ ...values, organizer_id: user.id })
-                .select("id")
-                .single();
-              if (error) throw error;
-              newId = data.id;
+            try {
+              if (tournament)
+                await rpc("update_tournament", {
+                  p_tournament_id: tournament.id,
+                  p_details: values,
+                });
+              else {
+                const { data, error } = await db()
+                  .from("tournaments")
+                  .insert({ ...values, organizer_id: user.id })
+                  .select("id")
+                  .single();
+                if (error) throw error;
+                newId = data.id;
+              }
+            } catch (error) {
+              if (banner && banner_path)
+                await discardUpload(banner_path).catch(() => undefined);
+              throw error;
             }
+            if (banner)
+              return await cleanupFeedback(
+                tournament ? "Tournament updated." : "Tournament created.",
+              );
           },
           tournament
             ? "Tournament updated."

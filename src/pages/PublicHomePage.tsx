@@ -160,6 +160,16 @@ export function PublicHomePage() {
                       {session.best_of === 3 ? "Best of 3" : "One game"} ·{" "}
                       {scoringRuleLabel(session.scoring_rule)}
                     </p>
+                    {session.mode === "bracket" && (
+                      <Badge tone="blue">
+                        Bracket ·{" "}
+                        {
+                          FORMAT_LABELS[
+                            session.bracket_format ?? "single_elimination"
+                          ]
+                        }
+                      </Badge>
+                    )}
                     <div className="tournament-meta">
                       <span>
                         <CalendarDays size={15} />
@@ -171,7 +181,9 @@ export function PublicHomePage() {
                       </span>
                       <span>
                         <UsersRound size={15} />
-                        {session.waiting.length} waiting
+                        {session.mode === "bracket"
+                          ? `${session.teams?.length ?? 0} entries`
+                          : `${session.waiting.length} waiting`}
                       </span>
                     </div>
                     <div className="event-progress">
@@ -179,7 +191,11 @@ export function PublicHomePage() {
                       <span>{completed} completed</span>
                     </div>
                     <div className="tournament-card-footer">
-                      <span>Courts, queue & results</span>
+                      <span>
+                        {session.mode === "bracket"
+                          ? "Bracket, courts & results"
+                          : "Courts, queue & results"}
+                      </span>
                       <ArrowRight size={17} />
                     </div>
                   </Link>

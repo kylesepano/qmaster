@@ -11,11 +11,15 @@ import {
 import { useApp } from "../hooks/useApp";
 import { Badge, Modal, PageHeader } from "../components/ui";
 import { rpc } from "../services/api";
+import { cleanUnusedImages, cleanupFeedback } from "../services/mediaCleanup";
+import { ActionFeedback } from "../services/actionFeedback";
+import { ConfirmationDialog } from "../components/ui";
 
 export function SettingsPage() {
   const { configured, user, live, busy, act, data } = useApp();
   const [clearing, setClearing] = useState(false);
   const [confirmation, setConfirmation] = useState("");
+  const [cleaning, setCleaning] = useState(false);
   return (
     <>
       <PageHeader
@@ -106,8 +110,9 @@ export function SettingsPage() {
         </div>
         <p className="muted">
           Permanently remove your players, tournaments, queue sessions, matches,
-          and scores. Active games are canceled. Your organizer login,
-          configuration, and uploaded files are kept.
+          and scores. Active games are canceled. Your organizer login and
+          configuration are kept. Uploaded player photos and tournament banners
+          are removed too.
         </p>
         <div className="form-actions">
           <button
@@ -136,11 +141,15 @@ export function SettingsPage() {
               e.preventDefault();
               if (confirmation !== "DELETE ALL") return;
               if (
-                await act(
-                  () =>
-                    rpc("clear_test_data", { p_confirmation: confirmation }),
-                  "Test data cleared. Your workspace is empty.",
-                )
+                await act(async () => {
+                  await rpc("clear_test_data", {
+                    p_confirmation: confirmation,
+                  });
+                  return await cleanupFeedback(
+                    "Test data cleared. Your workspace is empty.",
+                    true,
+                  );
+                }, "Test data cleared. Your workspace is empty.")
               )
                 setClearing(false);
             }}
@@ -149,8 +158,8 @@ export function SettingsPage() {
               This permanently deletes {data.players.length} players,{" "}
               {data.tournaments.length} tournaments, {data.queueSessions.length}{" "}
               queue sessions, and all their matches and scores from your
-              workspace. This cannot be undone. Your login and uploaded files
-              stay available.
+              workspace. This cannot be undone. Your login stays available.
+              Uploaded player photos and banners are removed too.
             </p>
             <label className="field">
               Type DELETE ALL to confirm
@@ -181,6 +190,54 @@ export function SettingsPage() {
             </div>
           </form>
         </Modal>
+      )}
+      <section className="card section-block">
+        <div className="card-header">
+          <div>
+            <h2>Image storage cleanup</h2>
+            <p>Clear unused photos left behind by earlier deletions.</p>
+          </div>
+          <CloudUpload size={20} />
+        </div>
+        <p className="muted">
+          Deleted and replaced images are removed automatically. If a cleanup
+          fails, it is retried while you are signed in. You can also scan your
+          media folder for unused images older than five minutes. Images still
+          used by players or tournament banners are kept.
+        </p>
+        <div className="form-actions">
+          <button
+            className="btn"
+            disabled={!configured || !user || busy}
+            onClick={() => setCleaning(true)}
+          >
+            Clean unused images
+          </button>
+        </div>
+      </section>
+      {cleaning && (
+        <ConfirmationDialog
+          title="Clean unused images?"
+          busy={busy}
+          onClose={() => setCleaning(false)}
+          onConfirm={() =>
+            void act(async () => {
+              const result = await cleanUnusedImages();
+              return new ActionFeedback(
+                result.error
+                  ? `Image cleanup could not finish: ${result.error} Please retry.`
+                  : `Image cleanup finished. ${result.removed} unused ${result.removed === 1 ? "image removed" : "images removed"}.`,
+                !!result.error,
+              );
+            }).then((ok) => {
+              if (ok) setCleaning(false);
+            })
+          }
+        >
+          Remove unreferenced images from your Qmaster media folder? Current
+          player photos and banners are preserved. Recent uploads are skipped
+          for five minutes so another device has time to finish saving.
+        </ConfirmationDialog>
       )}
       <div className="callout">
         <CloudUpload size={18} />

@@ -20,7 +20,10 @@ import {
 } from "lucide-react";
 import { useApp } from "../hooks/useApp";
 import { db, rpc } from "../services/api";
-import type { PlayType, ScoringRule } from "../types";
+import type { PlayType, ScoringRule, BracketFormat } from "../types";
+import { FORMAT_LABELS } from "../types";
+import { QueueTeams } from "../components/QueueTeams";
+import { QueueBracketSession } from "../components/QueueBracketSession";
 import { ScoringRuleField } from "../components/ScoringRuleField";
 import { scoringRuleLabel } from "../utilities/scoring";
 import {
@@ -32,6 +35,7 @@ import { suggestNextPlayers } from "../utilities/queue";
 import { CourtCard } from "../components/CourtCard";
 import { DeleteButton } from "../components/DeleteButton";
 import { PublishSessionButton } from "../components/PublishSessionButton";
+import { PlayerMultiSelect } from "../components/PlayerMultiSelect";
 
 export function QueueListPage() {
   const { data, user, act, busy, configured } = useApp();
@@ -42,6 +46,9 @@ export function QueueListPage() {
   const [courts, setCourts] = useState(3);
   const [bestOf, setBestOf] = useState<1 | 3>(1);
   const [scoringRule, setScoringRule] = useState<ScoringRule>("standard_21");
+  const [mode, setMode] = useState<"normal" | "bracket">("normal");
+  const [bracketFormat, setBracketFormat] =
+    useState<BracketFormat>("single_elimination");
   const navigate = useNavigate();
   const sessions = [...data.queueSessions].sort((a, b) =>
     b.created_at.localeCompare(a.created_at),
@@ -60,6 +67,8 @@ export function QueueListPage() {
           court_count: courts,
           best_of: bestOf,
           scoring_rule: scoringRule,
+          mode,
+          bracket_format: bracketFormat,
         })
         .select("id")
         .single();
@@ -150,6 +159,41 @@ export function QueueListPage() {
             </label>
           </div>
           <ScoringRuleField value={scoringRule} onChange={setScoringRule} />
+          <div className="form-grid">
+            <label className="field">
+              Session mode
+              <select
+                value={mode}
+                onChange={(e) =>
+                  setMode(e.target.value as "normal" | "bracket")
+                }
+              >
+                <option value="normal">
+                  Normal — manual or random matches
+                </option>
+                <option value="bracket">
+                  Bracket — generate matches and advance winners
+                </option>
+              </select>
+            </label>
+            {mode === "bracket" && (
+              <label className="field">
+                Bracket format
+                <select
+                  value={bracketFormat}
+                  onChange={(e) =>
+                    setBracketFormat(e.target.value as BracketFormat)
+                  }
+                >
+                  {Object.entries(FORMAT_LABELS).map(([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
           <div>
             <button
               className="btn primary"
@@ -168,10 +212,20 @@ export function QueueListPage() {
               (member) =>
                 member.session_id === session.id && member.status === "waiting",
             ).length;
-            const playing = data.queueMatches.filter(
-              (match) =>
-                match.session_id === session.id && match.status === "playing",
-            ).length;
+            const playing =
+              data.queueMatches.filter(
+                (match) =>
+                  match.session_id === session.id && match.status === "playing",
+              ).length +
+              data.tournamentMatches.filter(
+                (m) =>
+                  m.status === "playing" &&
+                  data.tournaments.some(
+                    (t) =>
+                      t.id === m.tournament_id &&
+                      t.queue_session_id === session.id,
+                  ),
+              ).length;
             return (
               <article className="card session-card" key={session.id}>
                 <div className="card-header">
@@ -207,7 +261,9 @@ export function QueueListPage() {
                 <div className="session-stats">
                   <span>
                     <Users size={15} />
-                    {waiting} waiting
+                    {session.mode === "bracket"
+                      ? `${(data.queueTeams ?? []).filter((t) => t.session_id === session.id).length} entries`
+                      : `${waiting} waiting`}
                   </span>
                   <span>
                     <Grid2X2 size={15} />
@@ -350,6 +406,8 @@ export function QueueDetailPage() {
       if (typeof matchId === "string") navigate(`/matches/${matchId}`);
     }
   }
+  if (session.mode === "bracket")
+    return <QueueBracketSession session={session} />;
   return (
     <div className="stack">
       <Link className="back-link" to="/queue">
@@ -426,6 +484,7 @@ export function QueueDetailPage() {
           );
         })}
       </div>
+      {session.play_type !== "singles" && <QueueTeams session={session} />}
       <div className="grid-2 queue-columns">
         <section className="card stack">
           <div className="card-header">
@@ -437,33 +496,19 @@ export function QueueDetailPage() {
           </div>
           {session.status === "ongoing" && (
             <form className="stack" onSubmit={addPlayers}>
-              <label className="field">
+              <div className="field">
                 <span>Add registered players</span>
-                <select
-                  multiple
-                  size={Math.min(5, Math.max(2, selectablePlayers.length))}
+                <PlayerMultiSelect
+                  options={selectablePlayers}
                   value={adding}
-                  onChange={(event) =>
-                    setAdding(
-                      Array.from(
-                        event.target.selectedOptions,
-                        (option) => option.value,
-                      ),
-                    )
-                  }
-                  aria-label="Players to add to queue"
-                >
-                  {selectablePlayers.map((player) => (
-                    <option key={player.id} value={player.id}>
-                      {player.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setAdding}
+                  disabled={busy}
+                />
                 <small className="muted">
-                  Select one or more players.{" "}
+                  Search by name, select multiple players, or use Select all.{" "}
                   <Link to="/players">Register a new player</Link>
                 </small>
-              </label>
+              </div>
               <button className="btn small" disabled={busy || !adding.length}>
                 <Plus size={15} />
                 Add {adding.length || ""} player{adding.length === 1 ? "" : "s"}

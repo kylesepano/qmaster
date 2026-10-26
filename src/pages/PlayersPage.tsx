@@ -12,6 +12,7 @@ import {
 import { useApp } from "../hooks/useApp";
 import { db, write } from "../services/api";
 import { uploadMedia } from "../services/media";
+import { cleanupFeedback, discardUpload } from "../services/mediaCleanup";
 import {
   ConfirmationDialog,
   EmptyState,
@@ -223,13 +224,26 @@ export function PlayersPage() {
                   let photoPath = editing?.photo_path ?? null;
                   if (photo) photoPath = await uploadMedia(photo, user.id);
                   const values = { name: name.trim(), photo_path: photoPath };
-                  await write(
-                    editing
-                      ? db().from("players").update(values).eq("id", editing.id)
-                      : db()
-                          .from("players")
-                          .insert({ ...values, organizer_id: user.id }),
-                  );
+                  try {
+                    await write(
+                      editing
+                        ? db()
+                            .from("players")
+                            .update(values)
+                            .eq("id", editing.id)
+                        : db()
+                            .from("players")
+                            .insert({ ...values, organizer_id: user.id }),
+                    );
+                  } catch (error) {
+                    if (photo && photoPath)
+                      await discardUpload(photoPath).catch(() => undefined);
+                    throw error;
+                  }
+                  if (photo)
+                    return await cleanupFeedback(
+                      editing ? "Player updated." : "Player added.",
+                    );
                 },
                 editing ? "Player updated." : "Player added.",
               );

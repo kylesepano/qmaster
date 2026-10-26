@@ -140,6 +140,24 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610260006_queue_teams_brackets.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610260007_media_cleanup.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await auth(owner);
 }, 30000);
 afterAll(async () => {
@@ -327,6 +345,461 @@ describe("Selectable scoring rules", () => {
         JSON.stringify({ scoring_rule: "lenient_31" }),
       ]),
     ).rejects.toThrow(/not found/);
+    await auth(owner);
+  });
+});
+
+async function queueBracketFixture(
+  count: number,
+  format:
+    | "single_elimination"
+    | "double_elimination"
+    | "round_robin" = "single_elimination",
+  mode: "normal" | "bracket" = "bracket",
+  playType = "doubles",
+) {
+  const event = await cleanupFixture();
+  const perTeam = playType === "singles" ? 1 : 2;
+  const ids = [...event.playerIds];
+  for (let i = ids.length; i < count * perTeam; i++) {
+    const id = crypto.randomUUID();
+    ids.push(id);
+    await db.query(
+      "insert into players(id,organizer_id,name) values($1,$2,$3)",
+      [id, event.uid, `Member ${i}`],
+    );
+  }
+  const sid = (
+    await db.query<{ id: string }>(
+      "insert into queue_sessions(organizer_id,name,play_type,court_count,best_of,mode,bracket_format) values($1,'Session draw',$2,3,1,$3,$4) returning id",
+      [event.uid, playType, mode, format],
+    )
+  ).rows[0].id;
+  const teams: string[] = [];
+  for (let i = 0; i < count; i++)
+    teams.push(
+      (
+        await db.query<{ id: string }>(
+          "select register_queue_team($1,$2,$3::uuid[]) as id",
+          [sid, `Team ${i + 1}`, ids.slice(i * perTeam, (i + 1) * perTeam)],
+        )
+      ).rows[0].id,
+    );
+  return { ...event, sid, teams, ids };
+}
+describe("Queue session teams and tournament brackets", () => {
+  it("reopens a completed double-elimination session and automatically calls its reset after a grand-final correction", async () => {
+    const event = await queueBracketFixture(
+      2,
+      "double_elimination",
+      "bracket",
+      "singles",
+    );
+    const tid = (
+      await db.query<{ id: string }>(
+        "select generate_queue_bracket($1,$2::uuid[],$3::jsonb) as id",
+        [
+          event.sid,
+          event.teams,
+          JSON.stringify(generateBracket(event.teams, "double_elimination")),
+        ],
+      )
+    ).rows[0].id;
+    for (const lane of ["upper", "final"]) {
+      const match = (
+        await db.query<{ id: string; version: number }>(
+          "select id,version from tournament_matches where tournament_id=$1 and bracket=$2 and status='playing'",
+          [tid, lane],
+        )
+      ).rows[0];
+      expect(match).toBeDefined();
+      await db.query(
+        "select save_match_score($1,'tournament','[]'::jsonb,$2,true,'a')",
+        [match.id, match.version],
+      );
+    }
+    expect(
+      (
+        await db.query<{ status: string }>(
+          "select status from queue_sessions where id=$1",
+          [event.sid],
+        )
+      ).rows[0].status,
+    ).toBe("completed");
+    const final = (
+      await db.query<{ id: string; version: number }>(
+        "select id,version from tournament_matches where tournament_id=$1 and bracket='final'",
+        [tid],
+      )
+    ).rows[0];
+    await db.query(
+      "select save_match_score($1,'tournament','[]'::jsonb,$2,true,'b')",
+      [final.id, final.version],
+    );
+    expect(
+      (
+        await db.query<{ status: string }>(
+          "select status from queue_sessions where id=$1",
+          [event.sid],
+        )
+      ).rows[0].status,
+    ).toBe("ongoing");
+    const reset = (
+      await db.query<{ id: string; version: number }>(
+        "select id,version from tournament_matches where tournament_id=$1 and bracket='reset' and status='playing'",
+        [tid],
+      )
+    ).rows[0];
+    expect(reset).toBeDefined();
+    await db.query(
+      "select save_match_score($1,'tournament','[]'::jsonb,$2,true,'a')",
+      [reset.id, reset.version],
+    );
+    expect(
+      (
+        await db.query<{ status: string }>(
+          "select status from queue_sessions where id=$1",
+          [event.sid],
+        )
+      ).rows[0].status,
+    ).toBe("completed");
+    await auth(owner);
+  });
+  it.each(["single_elimination", "double_elimination", "round_robin"] as const)(
+    "runs a %s session to a champion with automatic court filling and public results",
+    async (format) => {
+      const event = await queueBracketFixture(
+        format === "round_robin" ? 5 : 6,
+        format,
+      );
+      const order = [...event.teams].reverse();
+      const tid = (
+        await db.query<{ id: string }>(
+          "select generate_queue_bracket($1,$2::uuid[],$3::jsonb) as id",
+          [event.sid, order, JSON.stringify(generateBracket(order, format))],
+        )
+      ).rows[0].id;
+      await expect(
+        db.query("select generate_queue_bracket($1,$2::uuid[],$3::jsonb)", [
+          event.sid,
+          order,
+          JSON.stringify(generateBracket(order, format)),
+        ]),
+      ).rejects.toThrow(/already has a bracket/);
+      await expect(
+        db.query("select register_queue_team($1,$2,$3::uuid[])", [
+          event.sid,
+          "Too late",
+          event.ids.slice(0, 2),
+        ]),
+      ).rejects.toThrow(/Reset/);
+      await expect(
+        db.query("select end_queue_session($1)", [event.sid]),
+      ).rejects.toThrow(/Finish the session bracket/);
+      await expect(
+        db.query("select reset_queue_bracket($1)", [event.sid]),
+      ).rejects.toThrow(/Finish active matches/);
+      let played = 0;
+      for (let pass = 0; pass < 100; pass++) {
+        const active = (
+          await db.query<{ id: string; version: number; court_no: number }>(
+            "select id,version,court_no from tournament_matches where tournament_id=$1 and status='playing' order by court_no",
+            [tid],
+          )
+        ).rows;
+        expect(new Set(active.map((m) => m.court_no)).size).toBe(active.length);
+        expect(active.length).toBeLessThanOrEqual(3);
+        if (!active.length) break;
+        for (const m of active) {
+          await db.query(
+            "select save_match_score($1,'tournament',$2::jsonb,$3,true,null)",
+            [
+              m.id,
+              JSON.stringify([{ game_no: 1, score_a: 21, score_b: 17 }]),
+              m.version,
+            ],
+          );
+          played++;
+        }
+      }
+      expect(played).toBe(
+        format === "single_elimination"
+          ? 5
+          : format === "double_elimination"
+            ? 10
+            : 10,
+      );
+      const tournament = (
+        await db.query<{ champion_entry_id: string; status: string }>(
+          "select champion_entry_id,status from tournaments where id=$1",
+          [tid],
+        )
+      ).rows[0];
+      expect(tournament.status).toBe("completed");
+      expect(event.teams).toContain(tournament.champion_entry_id);
+      expect(
+        (
+          await db.query<{ status: string }>(
+            "select status from queue_sessions where id=$1",
+            [event.sid],
+          )
+        ).rows[0].status,
+      ).toBe("completed");
+      await db.query("select publish_queue_session($1,true)", [event.sid]);
+      await auth(null, "anon");
+      const snapshot = (
+        await db.query<{ data: any[] }>(
+          "select get_public_sessions($1) as data",
+          [event.sid],
+        )
+      ).rows[0].data[0];
+      expect(snapshot.mode).toBe("bracket");
+      expect(snapshot.bracket.champion_entry_id).toBe(
+        tournament.champion_entry_id,
+      );
+      expect(snapshot.matches).toHaveLength(played);
+      expect(snapshot.teams).toHaveLength(event.teams.length);
+      const profile = (
+        await db.query<{ data: any[] }>(
+          "select get_public_players($1) as data",
+          [event.ids[0]],
+        )
+      ).rows[0].data[0];
+      expect(profile.matches.length).toBeGreaterThan(0);
+      expect(
+        profile.matches.every(
+          (m: any) => m.kind === "queue" && m.event_id === event.sid,
+        ),
+      ).toBe(true);
+      await auth(event.uid);
+      await db.query("select reset_queue_bracket($1)", [event.sid]);
+      expect(
+        (
+          await db.query(
+            "select id from tournaments where queue_session_id=$1",
+            [event.sid],
+          )
+        ).rows,
+      ).toHaveLength(0);
+      expect(
+        (
+          await db.query("select id from queue_teams where session_id=$1", [
+            event.sid,
+          ])
+        ).rows,
+      ).toHaveLength(event.teams.length);
+      await auth(owner);
+    },
+  );
+  it("registers fixed teams in normal sessions, supports manual team choices, and fills courts without overlap", async () => {
+    const event = await queueBracketFixture(
+      4,
+      "single_elimination",
+      "normal",
+      "mixed",
+    );
+    await expect(
+      db.query("select register_queue_team($1,$2,$3::uuid[])", [
+        event.sid,
+        "Duplicate",
+        event.ids.slice(0, 2),
+      ]),
+    ).rejects.toThrow(/already registered/);
+    await expect(
+      db.query("select start_registered_queue_match($1,$1,1)", [
+        event.teams[0],
+      ]),
+    ).rejects.toThrow(/different teams/);
+    const mid = (
+      await db.query<{ id: string }>(
+        "select start_registered_queue_match($1,$2,1) as id",
+        [event.teams[0], event.teams[1]],
+      )
+    ).rows[0].id;
+    expect(
+      (
+        await db.query(
+          "select team_a_name,team_b_name from queue_matches where id=$1",
+          [mid],
+        )
+      ).rows[0],
+    ).toEqual({ team_a_name: "Team 1", team_b_name: "Team 2" });
+    await expect(
+      db.query("select remove_queue_team($1)", [event.teams[0]]),
+    ).rejects.toThrow(/Finish/);
+    expect(
+      (
+        await db.query<{ n: number }>(
+          "select auto_fill_session_courts($1) as n",
+          [event.sid],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    const active = (
+      await db.query<{ id: string; court_no: number }>(
+        "select id,court_no from queue_matches where session_id=$1 and status='playing'",
+        [event.sid],
+      )
+    ).rows;
+    expect(active).toHaveLength(2);
+    expect(new Set(active.map((m) => m.court_no)).size).toBe(2);
+    await db.query("select delete_queue_session($1)", [event.sid]);
+    expect(
+      (
+        await db.query("select id from queue_teams where session_id=$1", [
+          event.sid,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    await auth(owner);
+  });
+  it("skips players busy in another event and prevents anonymous or cross-owner bracket mutations", async () => {
+    const event = await queueBracketFixture(4);
+    await db.query("select assign_tournament_court($1,1)", [event.mid]);
+    const tid = (
+      await db.query<{ id: string }>(
+        "select generate_queue_bracket($1,$2::uuid[],$3::jsonb) as id",
+        [
+          event.sid,
+          event.teams,
+          JSON.stringify(generateBracket(event.teams, "single_elimination")),
+        ],
+      )
+    ).rows[0].id;
+    expect(
+      (
+        await db.query(
+          "select m.id from tournament_matches m join tournament_entry_players p on p.entry_id in(m.entry_a_id,m.entry_b_id) where m.tournament_id=$1 and m.status='playing' and p.player_id=$2",
+          [tid, event.ids[0]],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    await auth(other);
+    await expect(
+      db.query("select auto_fill_session_courts($1)", [event.sid]),
+    ).rejects.toThrow(/not found/);
+    await auth(null, "anon");
+    await expect(
+      db.query("select register_queue_team($1,$2,$3::uuid[])", [
+        event.sid,
+        "Intruder",
+        event.ids.slice(0, 2),
+      ]),
+    ).rejects.toThrow(/permission denied/);
+    await expect(db.query("select * from queue_teams")).rejects.toThrow(
+      /permission denied/,
+    );
+    await expect(
+      db.query(
+        "select save_match_score_core($1,'tournament','[]'::jsonb,0,true,'a')",
+        [event.mid],
+      ),
+    ).rejects.toThrow(/permission denied/);
+    await auth(event.uid);
+    await db.query("select delete_queue_session($1)", [event.sid]);
+    expect(
+      (await db.query("select id from tournaments where id=$1", [tid])).rows,
+    ).toHaveLength(0);
+    await auth(owner);
+  });
+});
+
+describe("Durable image cleanup requests", () => {
+  it("queues a photo only after a permanent player deletion succeeds and leaves Storage deletion to the API", async () => {
+    const event = await cleanupFixture();
+    const path = `${event.uid}/photo.jpg`,
+      blockedPath = `${event.uid}/keep.jpg`;
+    await db.query("update players set photo_path=$2 where id=$1", [
+      event.playerIds[2],
+      path,
+    ]);
+    await db.query("update players set photo_path=$2 where id=$1", [
+      event.playerIds[0],
+      blockedPath,
+    ]);
+    await db.query(
+      "insert into storage.objects(bucket_id,name) values('qmaster-media',$1)",
+      [path],
+    );
+    await db.query("update players set archived=true where id=$1", [
+      event.playerIds[2],
+    ]);
+    expect((await db.query("select id from media_cleanup")).rows).toHaveLength(
+      0,
+    );
+    await expect(
+      db.query("select purge_player($1)", [event.playerIds[0]]),
+    ).rejects.toThrow();
+    expect((await db.query("select id from media_cleanup")).rows).toHaveLength(
+      0,
+    );
+    await db.query("select purge_player($1)", [event.playerIds[2]]);
+    expect((await db.query("select path from media_cleanup")).rows).toEqual([
+      { path },
+    ]);
+    expect(
+      (await db.query("select id from storage.objects where name=$1", [path]))
+        .rows,
+    ).toHaveLength(1);
+    await auth(owner);
+  });
+  it("queues replaced photos once and preserves pending requests through a complete workspace reset", async () => {
+    const event = await cleanupFixture();
+    const a = `${event.uid}/old.png`,
+      b = `${event.uid}/new.webp`,
+      banner = `${event.uid}/banner.jpg`;
+    await db.query("update players set photo_path=$2 where id=$1", [
+      event.playerIds[0],
+      a,
+    ]);
+    await db.query("update players set photo_path=$2 where id=$1", [
+      event.playerIds[0],
+      b,
+    ]);
+    await db.query("update players set photo_path=$2 where id=$1", [
+      event.playerIds[0],
+      b,
+    ]);
+    expect((await db.query("select path from media_cleanup")).rows).toEqual([
+      { path: a },
+    ]);
+    await db.query("select update_tournament($1,$2::jsonb)", [
+      event.tid,
+      JSON.stringify({ banner_path: banner }),
+    ]);
+    await db.query("select clear_test_data('DELETE ALL')");
+    const jobs = (
+      await db.query<{ path: string }>("select path from media_cleanup")
+    ).rows.map((r) => r.path);
+    expect(new Set(jobs)).toEqual(new Set([a, b, banner]));
+    await auth(owner);
+  });
+  it("isolates owner cleanup jobs and rejects anonymous and outside-folder requests", async () => {
+    const event = await cleanupFixture();
+    const path = `${event.uid}/unused.jpg`;
+    await db.query("select enqueue_media_cleanup($1)", [path]);
+    await auth(other);
+    expect((await db.query("select id from media_cleanup")).rows).toHaveLength(
+      0,
+    );
+    await expect(
+      db.query("select enqueue_media_cleanup($1)", [path]),
+    ).rejects.toThrow(/own media folder/);
+    await auth(null, "anon");
+    await expect(db.query("select * from media_cleanup")).rejects.toThrow(
+      /permission denied/,
+    );
+    await expect(
+      db.query("select enqueue_media_cleanup($1)", [path]),
+    ).rejects.toThrow(/permission denied/);
+    await auth(event.uid);
+    for (const invalid of [`${event.uid}/../outside.jpg`, `${event.uid}/..`])
+      await expect(
+        db.query("select enqueue_media_cleanup($1)", [invalid]),
+      ).rejects.toThrow(/own media folder/);
+    expect((await db.query("select path from media_cleanup")).rows).toEqual([
+      { path },
+    ]);
     await auth(owner);
   });
 });

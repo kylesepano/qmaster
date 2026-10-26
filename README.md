@@ -55,6 +55,19 @@ You never manually enter BYEs, later-round participants, upper/lower bracket pro
 
 ## Supported formats and rules
 
+### Queue-session teams and brackets
+
+Apply `supabase/migrations/202610260006_queue_teams_brackets.sql` after the earlier migrations to enable these session modes. Existing sessions remain **Normal**.
+
+1. When creating a session, select **Session mode**: **Normal — manual or random matches**, or **Bracket — generate matches and advance winners**. Bracket sessions offer single elimination, double elimination, and round robin.
+2. For doubles or mixed, click **Add team**, enter the team name, and search/select exactly two registered players. Players are automatically added to the session roster. Each player can belong to one registered team in that session. Singles bracket sessions register one player per entry.
+3. In Normal sessions, choose **Team A**, **Team B**, and a court to start a match yourself. **Suggest random teams** chooses a pair for review; **Randomly fill courts** creates random ready-team matches across free courts. The original individual-player queue and manual match selection remain available.
+4. In Bracket sessions, register 2–64 entries and click **Generate bracket & fill courts**. The draw is randomized by default. To arrange it manually, turn randomization off and use the arrows to set seed order before generation. BYEs are generated automatically.
+5. Ready matches start on free courts automatically. Finalizing a result advances the bracket and fills newly available courts; the last result declares a session champion. Players already playing anywhere in the organizer's workspace are skipped. If a player becomes available after another event ends, click **Fill available courts** to retry ready matches.
+6. Publish the session to share its bracket, live courts, champion, and history without a spectator login. Bracket matches count once in each participating player's records and appear as session results. They are not duplicated in the tournament directory.
+
+The session mode is chosen at creation. Team membership and seeds lock after bracket generation. A confirmed bracket reset removes its scores and champion, returns the session to ongoing, and keeps the registered teams; finish active games before resetting. Deleting a session cancels active games and removes its teams, bracket, and scores. In Normal sessions, removing a registered team leaves its completed match results intact.
+
 - **Single elimination:** seeded knockout draw with automatic BYEs for non-power-of-two entry counts, including 6 and 10.
 - **Double elimination:** upper bracket, lower bracket, grand final, and a reset final only when the lower-bracket finalist wins the first grand final. A participant is eliminated after two played losses.
 - **Round robin:** each entry plays every other entry once; standings use match wins, game difference, point difference, then seed as the deterministic final tiebreaker. Walkovers award a match win without invented game scores.
@@ -92,7 +105,15 @@ You never manually enter BYEs, later-round participants, upper/lower bracket pro
 
 - Use the **trash button** on a tournament or queue card, or **Delete** on its detail page. Confirming permanently removes that event, all its matches/scores and registrations/queue members, including active games. Player records remain.
 - Players have separate **Archive** and **Delete** controls. Archive preserves history and can be undone. Permanent deletion removes an unused player and their waiting-queue memberships. For a player linked to tournament registrations or match history, delete the linked tournaments/sessions first, or use the workspace reset.
-- In **Settings → Clear all test data**, type **DELETE ALL** to remove all your players, events, matches, and scores. Your organizer login, environment configuration, and uploaded Storage files remain. Other organizers are unaffected. No test data is deleted merely by installing the migration.
+- In **Settings → Clear all test data**, type **DELETE ALL** to remove all your players, events, matches, and scores. Uploaded player photos and tournament banners are also removed through Storage cleanup. Your organizer login and environment configuration remain. Other organizers are unaffected. No test data is deleted merely by installing the migration.
+
+### Automatic photo and banner cleanup
+
+Apply `supabase/migrations/202610260007_media_cleanup.sql` after the earlier migrations. Permanent player deletion queues its photo for removal. Replacing a photo or banner queues the old file only after the new database value saves; tournament deletion and a full test-data reset queue their images too. Archiving preserves the player and photo. A blocked/failed record deletion leaves its image intact.
+
+Images are removed through the authenticated [Supabase Storage deletion API](https://supabase.com/docs/guides/storage/management/delete-objects), not by deleting Storage metadata in SQL. Cleanup requests persist in an owner-only table until the API succeeds. The app retries on admin sign-in and every minute while signed in; a failure after successful record deletion is shown as a pending-cleanup notice. Images still referenced by another player or banner are kept.
+
+For photos left behind by older versions, open **Settings → Image storage cleanup → Clean unused images**. This scans only your media folder, preserves current references, and skips unreferenced uploads newer than five minutes so another device can finish saving them. It also retries pending deletions immediately. If cleanup remains pending, verify the existing `qmaster-media` owner-folder SELECT and DELETE policies and retry. Hosted Storage deletion still requires verification against your own project; browser checks use intercepted Storage responses.
 
 ## Supabase security, uploads, and Realtime
 
