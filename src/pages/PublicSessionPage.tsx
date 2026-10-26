@@ -7,6 +7,7 @@ import { loadPublicSessions } from "../services/api";
 import { usePublicData } from "../hooks/usePublicData";
 import { SPORT_LABELS, type PublicSessionMatch } from "../types";
 import { scoringRuleLabel } from "../utilities/scoring";
+import { scheduleLabel, eventPhase, PHASE_LABELS } from "../utilities/schedule";
 import { BracketView, Standings } from "../components/BracketView";
 
 function SessionMatch({ match }: { match: PublicSessionMatch }) {
@@ -99,11 +100,11 @@ export function PublicSessionPage() {
         <>
           <PageHeader
             title={session.name}
-            subtitle={`${SPORT_LABELS[session.sport ?? "badminton"]} · ${session.play_type} · ${session.best_of === 3 ? "Best of 3" : "One game"} · ${scoringRuleLabel(session.scoring_rule)} · ${dateLabel(session.created_at)}`}
+            subtitle={`${scheduleLabel(session)} · ${SPORT_LABELS[session.sport ?? "badminton"]} · ${session.play_type} · ${session.best_of === 3 ? "Best of 3" : "One game"} · ${scoringRuleLabel(session.scoring_rule)}`}
             eyebrow="QUEUE SESSION"
             actions={
               <Badge tone={session.status === "ongoing" ? "green" : ""}>
-                {session.status === "ongoing" ? "Live now" : "Completed"}
+                {PHASE_LABELS[eventPhase(session, active.length > 0)]}
               </Badge>
             }
           />

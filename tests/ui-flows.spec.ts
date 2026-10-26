@@ -439,6 +439,25 @@ async function mockSupabase(
         enqueue(args.p_path);
         return json(null);
       }
+      if (name === "set_queue_schedule") {
+        const s = data.queueSessions.find((s) => s.id === args.p_session_id)!;
+        s.event_date = args.p_date;
+        s.start_time = args.p_time;
+        for (const t of data.tournaments.filter(
+          (t) => t.queue_session_id === s.id,
+        )) {
+          t.event_date = args.p_date;
+          t.start_time = args.p_time;
+        }
+        return json(null);
+      }
+      if (name === "update_tournament") {
+        Object.assign(
+          data.tournaments.find((t) => t.id === args.p_tournament_id)!,
+          args.p_details,
+        );
+        return json(null);
+      }
       if (name === "register_queue_team") {
         const team = {
           id: crypto.randomUUID(),
@@ -487,7 +506,8 @@ async function mockSupabase(
           id: tid,
           organizer_id: uid,
           name: session.name,
-          event_date: timestamp.slice(0, 10),
+          event_date: session.event_date ?? timestamp.slice(0, 10),
+          start_time: session.start_time,
           venue: null,
           description: null,
           play_type: session.play_type,
@@ -620,6 +640,8 @@ async function mockSupabase(
               court_count: s.court_count,
               best_of: s.best_of,
               scoring_rule: s.scoring_rule ?? "standard_21",
+              event_date: s.event_date ?? null,
+              start_time: s.start_time ?? null,
               sport: s.sport ?? "badminton",
               status: s.status,
               created_at: s.created_at,
@@ -1766,6 +1788,130 @@ test("public player directory and individual history display wins, losses and te
   await expect(
     page.getByRole("heading", { name: "Mixed cup", exact: true }),
   ).toHaveCount(0);
+});
+
+test("session and tournament creation save event dates and start times, with editable session schedules", async ({
+  page,
+}) => {
+  const data = fixture(),
+    harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto("/queue?new=1");
+  await page
+    .getByLabel("Session name", { exact: true })
+    .fill("Scheduled session");
+  await page.getByLabel("Event date", { exact: true }).fill("2030-11-02");
+  await page.getByLabel("Start time (UTC+8)", { exact: true }).fill("19:30");
+  await page
+    .getByRole("button", { name: "Create session", exact: true })
+    .click();
+  await expect(
+    page.getByText("Nov 2, 2030 · 7:30 PM (UTC+8)", { exact: true }),
+  ).toBeVisible();
+  const s = data.queueSessions.find((s) => s.name === "Scheduled session")!;
+  expect(s).toMatchObject({ event_date: "2030-11-02", start_time: "19:30" });
+  await page
+    .getByRole("button", { name: "Edit schedule", exact: true })
+    .click();
+  await page.getByLabel("Event date", { exact: true }).fill("2030-11-03");
+  await page.getByLabel("Start time (UTC+8)", { exact: true }).fill("08:15");
+  await page
+    .getByRole("button", { name: "Save schedule", exact: true })
+    .click();
+  await expect(
+    page.getByText("Nov 3, 2030 · 8:15 AM (UTC+8)", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByText("Nov 3, 2030 · 8:15 AM (UTC+8)", { exact: true }),
+  ).toBeVisible();
+  await page.goto("/tournaments/new");
+  await page
+    .getByLabel("Tournament name", { exact: true })
+    .fill("Scheduled cup");
+  await page.getByLabel("Event date", { exact: true }).fill("2030-11-04");
+  await page.getByLabel("Start time (UTC+8)", { exact: true }).fill("09:45");
+  await page
+    .getByRole("button", { name: "Create tournament", exact: true })
+    .click();
+  await expect(
+    page.getByText("Nov 4, 2030 · 9:45 AM (UTC+8)", { exact: true }),
+  ).toBeVisible();
+  expect(
+    data.tournaments.find((t) => t.name === "Scheduled cup"),
+  ).toMatchObject({ event_date: "2030-11-04", start_time: "09:45" });
+});
+
+test("public upcoming filters show scheduled dates and times in nearest-first order without login", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.queueSessions[0] = {
+    ...data.queueSessions[0],
+    published: true,
+    event_date: "2030-11-03",
+    start_time: "20:15",
+  };
+  data.queueSessions.push({
+    ...data.queueSessions[0],
+    id: crypto.randomUUID(),
+    name: "Earlier session",
+    event_date: "2030-11-02",
+    start_time: "18:45",
+  });
+  data.queueSessions.push({
+    ...data.queueSessions[0],
+    id: crypto.randomUUID(),
+    name: "Private scheduled session",
+    published: false,
+  });
+  data.tournaments[0] = {
+    ...data.tournaments[0],
+    published: true,
+    event_date: "2030-11-04",
+    start_time: "09:45",
+  };
+  await mockSupabase(page, { data, calls: [] }, false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Upcoming", exact: true }).click();
+  await expect(page.locator(".public-event-card h2")).toHaveText([
+    "Club singles",
+  ]);
+  await expect(
+    page.getByText("Nov 4, 2030 · 9:45 AM (UTC+8)", { exact: true }),
+  ).toBeVisible();
+  await page.locator(".public-event-card").first().click();
+  await expect(
+    page.getByText("Nov 4, 2030 · 9:45 AM (UTC+8)", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Public navigation" })
+    .getByRole("link", { name: "Sessions", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Upcoming", exact: true }).click();
+  await expect(page.locator(".public-event-card h2")).toHaveText([
+    "Earlier session",
+    "Friday doubles",
+  ]);
+  await expect(
+    page.getByText("Nov 2, 2030 · 6:45 PM (UTC+8)", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Live now", exact: true }).click();
+  await expect(page.locator(".public-event-card")).toHaveCount(0);
+  await page.getByRole("button", { name: "Upcoming", exact: true }).click();
+  await page.locator(".public-event-card").first().click();
+  await expect(
+    page.getByText(/Nov 2, 2030 · 6:45 PM \(UTC\+8\)/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Admin login", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
 });
 
 test("normal pickleball creation estimates equal games from hours, courts and expected players", async ({

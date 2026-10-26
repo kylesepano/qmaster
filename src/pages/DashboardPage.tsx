@@ -15,6 +15,7 @@ import {
 import { useApp } from "../hooks/useApp";
 import { Badge, EmptyState, PageHeader, dateLabel } from "../components/ui";
 import { FORMAT_LABELS } from "../types";
+import { scheduleLabel } from "../utilities/schedule";
 
 export function DashboardPage() {
   const { data } = useApp();
@@ -317,7 +318,7 @@ export function DashboardPage() {
                       <strong>{t.name}</strong>
                       <span>
                         <CalendarDays size={12} />
-                        {dateLabel(t.event_date)}
+                        {scheduleLabel(t)}
                         <span>·</span>
                         {FORMAT_LABELS[t.format]}
                       </span>

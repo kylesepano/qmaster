@@ -9,12 +9,19 @@ import {
   UsersRound,
 } from "lucide-react";
 import { PublicLayout } from "../components/PublicLayout";
-import { Badge, EmptyState, dateLabel } from "../components/ui";
+import { Badge, EmptyState } from "../components/ui";
 import { loadPublicDirectory, loadPublicSessions } from "../services/api";
 import { usePublicData } from "../hooks/usePublicData";
 import { FORMAT_LABELS, SPORT_LABELS, type Sport } from "../types";
 import { SportFilter } from "../components/SportField";
 import { scoringRuleLabel } from "../utilities/scoring";
+import {
+  scheduleLabel,
+  eventPhase,
+  compareScheduledEvents,
+  PHASE_LABELS,
+  type EventPhase,
+} from "../utilities/schedule";
 
 export function PublicHomePage() {
   const [params, setParams] = useSearchParams();
@@ -41,25 +48,33 @@ export function PublicHomePage() {
     else next.delete(key);
     setParams(next, { replace: true });
   }
-  const visible = (item: { name: string; status: string; sport?: Sport }) =>
+  const visible = (item: { name: string; phase: EventPhase; sport?: Sport }) =>
     (sport === "all" || (item.sport ?? "badminton") === sport) &&
     item.name.toLowerCase().includes(search.toLowerCase()) &&
-    (status === "all" || item.status === status);
-  const rank: Record<string, number> = { ongoing: 0, draft: 1, completed: 2 };
+    (status === "all" ||
+      item.phase === (status === "draft" ? "upcoming" : status));
   const tournaments = [...(data?.directory?.tournaments ?? [])]
+    .map((t) => ({
+      ...t,
+      phase: eventPhase(
+        t,
+        data?.directory?.matches.some(
+          (m) => m.tournament_id === t.id && m.status === "playing",
+        ),
+      ),
+    }))
     .filter(visible)
-    .sort(
-      (a, b) =>
-        rank[a.status] - rank[b.status] ||
-        b.event_date.localeCompare(a.event_date),
-    );
+    .sort(compareScheduledEvents);
   const sessions = [...(data?.sessions ?? [])]
+    .map((s) => ({
+      ...s,
+      phase: eventPhase(
+        s,
+        s.matches.some((m) => m.status === "playing"),
+      ),
+    }))
     .filter(visible)
-    .sort(
-      (a, b) =>
-        rank[a.status] - rank[b.status] ||
-        b.created_at.localeCompare(a.created_at),
-    );
+    .sort(compareScheduledEvents);
   return (
     <PublicLayout live={live}>
       <section className="spectator-hero">
@@ -84,7 +99,7 @@ export function PublicHomePage() {
           {[
             ["all", "All events"],
             ["ongoing", "Live now"],
-            ...(!sessionsView ? [["draft", "Upcoming"]] : []),
+            ["upcoming", "Upcoming"],
             ["completed", "History"],
           ].map(([value, label]) => (
             <button
@@ -155,10 +170,8 @@ export function PublicHomePage() {
                       <span className="event-icon">
                         <Grid2X2 size={23} />
                       </span>
-                      <Badge tone={session.status === "ongoing" ? "green" : ""}>
-                        {session.status === "ongoing"
-                          ? "Live now"
-                          : "Completed"}
+                      <Badge tone={session.phase === "ongoing" ? "green" : ""}>
+                        {PHASE_LABELS[session.phase]}
                       </Badge>
                     </div>
                     <h2>{session.name}</h2>
@@ -181,7 +194,7 @@ export function PublicHomePage() {
                     <div className="tournament-meta">
                       <span>
                         <CalendarDays size={15} />
-                        {dateLabel(session.created_at)}
+                        {scheduleLabel(session)}
                       </span>
                       <span>
                         <Grid2X2 size={15} />
@@ -236,18 +249,14 @@ export function PublicHomePage() {
                       </span>
                       <Badge
                         tone={
-                          t.status === "ongoing"
+                          t.phase === "ongoing"
                             ? "green"
                             : t.status === "completed"
                               ? "blue"
                               : ""
                         }
                       >
-                        {t.status === "ongoing"
-                          ? "Live now"
-                          : t.status === "draft"
-                            ? "Upcoming"
-                            : "Completed"}
+                        {PHASE_LABELS[t.phase]}
                       </Badge>
                     </div>
                     <h2>{t.name}</h2>
@@ -258,7 +267,7 @@ export function PublicHomePage() {
                     <div className="tournament-meta">
                       <span>
                         <CalendarDays size={15} />
-                        {dateLabel(t.event_date)}
+                        {scheduleLabel(t)}
                       </span>
                       <span>
                         <UsersRound size={15} />

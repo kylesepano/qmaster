@@ -39,12 +39,21 @@ import { PublishSessionButton } from "../components/PublishSessionButton";
 import { PlayerMultiSelect } from "../components/PlayerMultiSelect";
 import { SessionTiming } from "../components/SessionTiming";
 import { PickleballRotation } from "../components/PickleballRotation";
+import { ScheduleFields } from "../components/ScheduleFields";
+import { EditSessionSchedule } from "../components/EditSessionSchedule";
+import {
+  todayEventDate,
+  scheduleLabel,
+  eventPhase,
+} from "../utilities/schedule";
 
 export function QueueListPage() {
   const { data, user, act, busy, configured } = useApp();
   const [params] = useSearchParams();
   const [creating, setCreating] = useState(params.get("new") === "1");
   const [name, setName] = useState("");
+  const [date, setDate] = useState(todayEventDate());
+  const [startTime, setStartTime] = useState("09:00");
   const [sport, setSport] = useState<Sport>("badminton");
   const [filterSport, setFilterSport] = useState<Sport | "all">("all");
   const [playType, setPlayType] = useState<PlayType>("doubles");
@@ -73,6 +82,8 @@ export function QueueListPage() {
         .insert({
           organizer_id: user.id,
           name: name.trim(),
+          event_date: date,
+          start_time: startTime,
           play_type: playType,
           court_count: courts,
           best_of: bestOf,
@@ -182,6 +193,14 @@ export function QueueListPage() {
                 <option value="3">Best of 3</option>
               </select>
             </label>
+          </div>
+          <div className="form-grid">
+            <ScheduleFields
+              date={date}
+              time={startTime}
+              onDate={setDate}
+              onTime={setStartTime}
+            />
           </div>
           <ScoringRuleField
             sport={sport}
@@ -301,13 +320,18 @@ export function QueueListPage() {
                     <span
                       className={`badge ${session.status === "ongoing" ? "green" : ""}`}
                     >
-                      {session.status === "ongoing" ? "Active" : "Ended"}
+                      {eventPhase(session, playing > 0) === "upcoming"
+                        ? "Upcoming"
+                        : session.status === "ongoing"
+                          ? "Active"
+                          : "Ended"}
                     </span>
                   </div>
                 </div>
                 <h2>
                   <Link to={`/queue/${session.id}`}>{session.name}</Link>
                 </h2>
+                <p className="muted">{scheduleLabel(session)}</p>
                 <p className="muted">
                   {SPORT_LABELS[session.sport ?? "badminton"]} ·{" "}
                   {session.play_type === "mixed"
@@ -486,6 +510,7 @@ export function QueueDetailPage() {
             QUEUE
           </span>
           <h1>{session.name}</h1>
+          <p className="muted">{scheduleLabel(session)}</p>
           <p className="muted">
             {members.length} players · {waiting.length} waiting ·{" "}
             {active.length} courts occupied
@@ -499,7 +524,11 @@ export function QueueDetailPage() {
           <span
             className={`badge ${session.status === "ongoing" ? "green" : ""}`}
           >
-            {session.status === "ongoing" ? "Active session" : "Session ended"}
+            {eventPhase(session, active.length > 0) === "upcoming"
+              ? "Upcoming"
+              : session.status === "ongoing"
+                ? "Active session"
+                : "Session ended"}
           </span>
           <DeleteButton
             kind="session"
@@ -508,6 +537,7 @@ export function QueueDetailPage() {
             onDeleted={() => navigate("/queue")}
           />
           <PublishSessionButton session={session} />
+          <EditSessionSchedule session={session} />
           {session.status === "ongoing" && (
             <button
               className="btn danger"

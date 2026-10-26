@@ -6,6 +6,8 @@ import type { QueueSession } from "../types";
 import { FORMAT_LABELS } from "../types";
 import { rpc } from "../services/api";
 import { generateBracket, shuffleEntries } from "../utilities/brackets";
+import { scheduleLabel, eventPhase } from "../utilities/schedule";
+import { EditSessionSchedule } from "./EditSessionSchedule";
 import { scoringRuleLabel } from "../utilities/scoring";
 import { BracketView, Standings } from "./BracketView";
 import { CourtCard } from "./CourtCard";
@@ -45,14 +47,19 @@ export function QueueBracketSession({ session }: { session: QueueSession }) {
       </Link>
       <PageHeader
         title={session.name}
-        subtitle={`${FORMAT_LABELS[format]} · ${session.play_type} · ${scoringRuleLabel(session.scoring_rule)}`}
+        subtitle={`${scheduleLabel(session)} · ${FORMAT_LABELS[format]} · ${session.play_type} · ${scoringRuleLabel(session.scoring_rule)}`}
         eyebrow="BRACKET SESSION"
         actions={
           <>
             <Badge tone={session.status === "ongoing" ? "green" : ""}>
-              {session.status === "ongoing" ? "Active" : "Completed"}
+              {eventPhase(session, active.length > 0) === "upcoming"
+                ? "Upcoming"
+                : session.status === "ongoing"
+                  ? "Active"
+                  : "Completed"}
             </Badge>
             <PublishSessionButton session={session} />
+            <EditSessionSchedule session={session} />
             <DeleteButton
               kind="session"
               id={session.id}

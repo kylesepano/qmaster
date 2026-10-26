@@ -176,10 +176,150 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610260010_event_schedules.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await auth(owner);
 }, 30000);
 afterAll(async () => {
   await db?.close();
+});
+
+describe("Event dates and start times", () => {
+  it("saves creation schedules and publishes only explicitly shared session schedules", async () => {
+    const event = await cleanupFixture();
+    const sid = (
+      await db.query<{ id: string }>(
+        "insert into queue_sessions(organizer_id,name,play_type,court_count,best_of,event_date,start_time) values($1,'Future session','doubles',2,1,'2030-11-02','19:30') returning id",
+        [event.uid],
+      )
+    ).rows[0].id;
+    expect(
+      (
+        await db.query<{ event_date: string; start_time: string }>(
+          "select event_date::text,start_time::text from queue_sessions where id=$1",
+          [sid],
+        )
+      ).rows[0],
+    ).toEqual({ event_date: "2030-11-02", start_time: "19:30:00" });
+    await auth(null, "anon");
+    expect(
+      (
+        await db.query<{ data: any[] }>(
+          "select get_public_sessions($1) as data",
+          [sid],
+        )
+      ).rows[0].data,
+    ).toEqual([]);
+    await expect(
+      db.query("select set_queue_schedule($1,'2030-11-03','09:00')", [sid]),
+    ).rejects.toThrow(/permission denied/);
+    await auth(event.uid);
+    await db.query("select publish_queue_session($1,true)", [sid]);
+    await auth(null, "anon");
+    expect(
+      (
+        await db.query<{ data: any[] }>(
+          "select get_public_sessions($1) as data",
+          [sid],
+        )
+      ).rows[0].data[0],
+    ).toMatchObject({ event_date: "2030-11-02", start_time: "19:30:00" });
+    await auth(other);
+    await expect(
+      db.query("select set_queue_schedule($1,'2030-11-03','09:00')", [sid]),
+    ).rejects.toThrow(/not found/);
+    await auth(event.uid);
+    await expect(
+      db.query("select set_queue_schedule($1,null,'09:00')", [sid]),
+    ).rejects.toThrow(/event date/);
+    await expect(
+      db.query("select set_queue_schedule($1,'2030-11-02','24:00')", [sid]),
+    ).rejects.toThrow(/valid start time/);
+    await expect(
+      db.query(
+        "insert into queue_sessions(organizer_id,name,play_type,court_count,best_of,start_time) values($1,'Missing date','doubles',1,1,'09:00')",
+        [event.uid],
+      ),
+    ).rejects.toThrow(/schedule_check/);
+    await db.query("select update_tournament($1,$2::jsonb)", [
+      event.tid,
+      JSON.stringify({ event_date: "2030-11-02", start_time: "08:45" }),
+    ]);
+    expect(
+      (
+        await db.query<{ event_date: string; start_time: string }>(
+          "select event_date::text,start_time::text from tournaments where id=$1",
+          [event.tid],
+        )
+      ).rows[0],
+    ).toEqual({ event_date: "2030-11-02", start_time: "08:45:00" });
+    await auth(owner);
+  });
+  it("inherits a session schedule in its generated bracket and keeps later schedule edits synchronized", async () => {
+    const event = await queueBracketFixture(2);
+    await db.query("select set_queue_schedule($1,'2030-11-02','19:30')", [
+      event.sid,
+    ]);
+    const tid = (
+      await db.query<{ id: string }>(
+        "select generate_queue_bracket($1,$2::uuid[],$3::jsonb) as id",
+        [
+          event.sid,
+          event.teams,
+          JSON.stringify(generateBracket(event.teams, "single_elimination")),
+        ],
+      )
+    ).rows[0].id;
+    expect(
+      (
+        await db.query<{ event_date: string; start_time: string }>(
+          "select event_date::text,start_time::text from tournaments where id=$1",
+          [tid],
+        )
+      ).rows[0],
+    ).toEqual({ event_date: "2030-11-02", start_time: "19:30:00" });
+    await db.query("select set_queue_schedule($1,'2030-11-03','10:15')", [
+      event.sid,
+    ]);
+    expect(
+      (
+        await db.query<{ event_date: string; start_time: string }>(
+          "select event_date::text,start_time::text from tournaments where id=$1",
+          [tid],
+        )
+      ).rows[0],
+    ).toEqual({ event_date: "2030-11-03", start_time: "10:15:00" });
+    await auth(owner);
+  });
+  it("keeps legacy schedules unknown instead of using record creation dates", async () => {
+    const event = await cleanupFixture();
+    expect(
+      (
+        await db.query<{
+          event_date: string | null;
+          start_time: string | null;
+        }>("select event_date,start_time from queue_sessions where id=$1", [
+          event.sid,
+        ])
+      ).rows[0],
+    ).toEqual({ event_date: null, start_time: null });
+    expect(
+      (
+        await db.query<{ start_time: string | null }>(
+          "select start_time from tournaments where id=$1",
+          [event.tid],
+        )
+      ).rows[0].start_time,
+    ).toBeNull();
+    await auth(owner);
+  });
 });
 
 async function rotationFixture(n = 8, playType = "doubles", courts = 2) {

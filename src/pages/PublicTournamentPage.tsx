@@ -5,9 +5,10 @@ import { PublicLayout } from "../components/PublicLayout";
 import { loadPublicTournament } from "../services/api";
 import { supabase } from "../lib/supabase";
 import { BracketView, Standings } from "../components/BracketView";
-import { Badge, dateLabel, EmptyState } from "../components/ui";
+import { Badge, EmptyState } from "../components/ui";
 import { FORMAT_LABELS, SPORT_LABELS } from "../types";
 import { scoringRuleLabel } from "../utilities/scoring";
+import { scheduleLabel, eventPhase, PHASE_LABELS } from "../utilities/schedule";
 
 export function PublicTournamentPage() {
   const { id } = useParams();
@@ -124,11 +125,18 @@ export function PublicTournamentPage() {
             )}
             <div className="event-details-bar">
               <Badge tone={tournament.status === "ongoing" ? "green" : ""}>
-                {tournament.status}
+                {
+                  PHASE_LABELS[
+                    eventPhase(
+                      tournament,
+                      data.matches.some((m) => m.status === "playing"),
+                    )
+                  ]
+                }
               </Badge>
               <span>
                 <CalendarDays size={16} />
-                {dateLabel(tournament.event_date)}
+                {scheduleLabel(tournament)}
               </span>
               {tournament.venue && (
                 <span>

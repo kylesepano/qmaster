@@ -42,18 +42,26 @@ This is a Vite SPA. Start it through npm even if the folder is under Laragon; op
 
 ### Each event
 
-| Area         | Required manual input                                                                         | Optional / automatic                                                           |
-| ------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Players      | Player name                                                                                   | Optional profile image; no player account                                      |
-| Tournament   | Name, date, sport, scoring rules, singles/doubles/mixed, bracket format, courts, match format | Venue, description, private organizer banner                                   |
-| Participants | Select registered players; select exactly two per doubles team                                | Custom team name, manual seed order, randomized draw                           |
-| Queue        | Session name, sport, scoring rules, singles/doubles/mixed, courts, player roster              | FIFO suggestions; manually override sides and rejoin preference                |
-| Match        | Select an available court and enter points or final game scores; confirm final result         | Game/match winner, progression, court release and queue rotation are automatic |
-| Spectators   | Explicitly publish the tournament and share its link                                          | No spectator login; live updates and reconnect refresh                         |
+| Area         | Required manual input                                                                                     | Optional / automatic                                                           |
+| ------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Players      | Player name                                                                                               | Optional profile image; no player account                                      |
+| Tournament   | Name, date, start time, sport, scoring rules, singles/doubles/mixed, bracket format, courts, match format | Venue, description, private organizer banner                                   |
+| Participants | Select registered players; select exactly two per doubles team                                            | Custom team name, manual seed order, randomized draw                           |
+| Queue        | Session name, date, start time, sport, scoring rules, singles/doubles/mixed, courts, player roster        | FIFO suggestions; manually override sides and rejoin preference                |
+| Match        | Select an available court and enter points or final game scores; confirm final result                     | Game/match winner, progression, court release and queue rotation are automatic |
+| Spectators   | Explicitly publish the tournament and share its link                                                      | No spectator login; live updates and reconnect refresh                         |
 
 You never manually enter BYEs, later-round participants, upper/lower bracket progression, or the champion. Click **Generate draw**, then **Start tournament**, assign a ready match to a court, and score it.
 
 ## Supported formats and rules
+
+### Event dates and start times
+
+Apply `supabase/migrations/202610260010_event_schedules.sql` after 001–009. Every new session and tournament form has **Event date** and **Start time (UTC+8)** fields. All schedules use Singapore/Manila time and show an explicit UTC+8 label to visitors, independently of their device timezone. The creation defaults are today's date in UTC+8 and 09:00; change these to the actual event schedule.
+
+Published session/tournament cards and detail pages show the schedule. Both directories offer **Upcoming**, sorted by nearest scheduled start, alongside live events and history. Completed events remain in History; a future scheduled event is Upcoming unless an actual match is already playing. Draft tournaments remain Upcoming until started. Dates are planning metadata and do not prevent an organizer from starting games early or automatically start an event when its time arrives.
+
+Use **Edit schedule** on an admin session page to change the date/time; tournament schedules can be changed through **Edit**. Generated session brackets inherit their session schedule, and later session schedule edits keep the linked bracket synchronized. Existing sessions are left without a schedule and display **Schedule to be announced**; existing tournaments keep their date and display **Time to be announced** until a start time is entered. Record creation timestamps are not presented as event schedules. Only published events expose schedule information publicly; changing a schedule does not publish it.
 
 ### Equal-play pickleball rotations (Normal sessions)
 

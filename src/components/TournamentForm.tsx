@@ -15,6 +15,8 @@ import type {
 import { ScoringRuleField } from "./ScoringRuleField";
 import { SportField } from "./SportField";
 import { FORMAT_LABELS } from "../types";
+import { ScheduleFields } from "./ScheduleFields";
+import { todayEventDate } from "../utilities/schedule";
 
 export function TournamentForm({
   tournament,
@@ -27,8 +29,9 @@ export function TournamentForm({
   const navigate = useNavigate();
   const [name, setName] = useState(tournament?.name ?? "");
   const [sport, setSport] = useState<Sport>(tournament?.sport ?? "badminton");
-  const [date, setDate] = useState(
-    tournament?.event_date ?? new Date().toLocaleDateString("en-CA"),
+  const [date, setDate] = useState(tournament?.event_date ?? todayEventDate());
+  const [startTime, setStartTime] = useState(
+    tournament?.start_time?.slice(0, 5) ?? "09:00",
   );
   const [venue, setVenue] = useState(tournament?.venue ?? ""),
     [description, setDescription] = useState(tournament?.description ?? "");
@@ -72,6 +75,7 @@ export function TournamentForm({
             const values = {
               name: name.trim(),
               event_date: date,
+              start_time: startTime,
               venue: venue.trim() || null,
               description: description.trim() || null,
               play_type: playType,
@@ -151,15 +155,12 @@ export function TournamentForm({
               onChange={(e) => setName(e.target.value)}
             />
           </label>
-          <label className="field">
-            Date
-            <input
-              type="date"
-              required
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-          </label>
+          <ScheduleFields
+            date={date}
+            time={startTime}
+            onDate={setDate}
+            onTime={setStartTime}
+          />
           <label className="field">
             Venue <span className="muted">(optional)</span>
             <input

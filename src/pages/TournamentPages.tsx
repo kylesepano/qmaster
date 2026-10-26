@@ -30,7 +30,6 @@ import {
   EmptyState,
   Modal,
   PageHeader,
-  dateLabel,
 } from "../components/ui";
 import { TournamentForm } from "../components/TournamentForm";
 import { BracketView, Standings } from "../components/BracketView";
@@ -40,6 +39,7 @@ import { generateBracket, shuffleEntries } from "../utilities/brackets";
 import { FORMAT_LABELS, SPORT_LABELS, type Sport } from "../types";
 import { SportFilter } from "../components/SportField";
 import { scoringRuleLabel } from "../utilities/scoring";
+import { scheduleLabel } from "../utilities/schedule";
 import type { Entry } from "../types";
 import { DeleteButton } from "../components/DeleteButton";
 
@@ -132,7 +132,7 @@ export function TournamentsPage() {
               <div className="tournament-meta">
                 <span>
                   <CalendarDays size={15} />
-                  {dateLabel(t.event_date)}
+                  {scheduleLabel(t)}
                 </span>
                 <span>
                   <UsersRound size={15} />
@@ -328,7 +328,7 @@ export function TournamentDetailPage() {
         </Badge>
         <span>
           <CalendarDays size={16} />
-          {dateLabel(tournament.event_date)}
+          {scheduleLabel(tournament)}
         </span>
         {tournament.venue && (
           <span>

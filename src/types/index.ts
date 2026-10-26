@@ -24,6 +24,7 @@ export interface Player {
   created_at: string;
 }
 export interface Tournament {
+  start_time?: string | null;
   sport?: Sport;
   id: string;
   organizer_id: string;
@@ -77,6 +78,8 @@ export interface TournamentMatch {
   version: number;
 }
 export interface QueueSession {
+  event_date?: string | null;
+  start_time?: string | null;
   session_hours?: number;
   estimated_match_minutes?: number;
   sport?: Sport;
@@ -129,6 +132,8 @@ export interface PublicSessionMatch {
   games: Game[];
 }
 export interface PublicSession {
+  event_date?: string | null;
+  start_time?: string | null;
   sport?: Sport;
   id: string;
   name: string;
