@@ -6,7 +6,7 @@ import { loadPublicTournament } from "../services/api";
 import { supabase } from "../lib/supabase";
 import { BracketView, Standings } from "../components/BracketView";
 import { Badge, dateLabel, EmptyState } from "../components/ui";
-import { FORMAT_LABELS } from "../types";
+import { FORMAT_LABELS, SPORT_LABELS } from "../types";
 import { scoringRuleLabel } from "../utilities/scoring";
 
 export function PublicTournamentPage() {
@@ -137,6 +137,7 @@ export function PublicTournamentPage() {
                 </span>
               )}
               <span>
+                {SPORT_LABELS[tournament.sport ?? "badminton"]} ·{" "}
                 {tournament.play_type} ·{" "}
                 {tournament.best_of === 3 ? "Best of 3" : "One game"} ·{" "}
                 {scoringRuleLabel(tournament.scoring_rule)}

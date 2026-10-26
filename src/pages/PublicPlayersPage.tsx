@@ -1,11 +1,17 @@
 import { useCallback, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Search, UsersRound } from "lucide-react";
 import { PublicLayout } from "../components/PublicLayout";
 import { Badge, EmptyState, PageHeader, dateLabel } from "../components/ui";
 import { usePublicData } from "../hooks/usePublicData";
 import { loadPublicPlayers } from "../services/api";
-import type { PublicPlayer, PublicPlayerMatch } from "../types";
+import {
+  SPORT_LABELS,
+  type PublicPlayer,
+  type PublicPlayerMatch,
+  type Sport,
+} from "../types";
+import { SportField } from "../components/SportField";
 
 function Record({ player }: { player: PublicPlayer }) {
   const played = player.wins + player.losses;
@@ -39,6 +45,7 @@ function HistoryMatch({ match }: { match: PublicPlayerMatch }) {
         <div>
           <h3>{match.event_name}</h3>
           <p>
+            {SPORT_LABELS[match.sport ?? "badminton"]} ·{" "}
             {match.kind === "queue" ? "Queue session" : "Tournament"} ·{" "}
             {match.play_type === "mixed" ? "Mixed doubles" : match.play_type} ·{" "}
             {dateLabel(match.completed_at)}
@@ -78,7 +85,10 @@ function HistoryMatch({ match }: { match: PublicPlayerMatch }) {
 }
 export function PublicPlayersPage() {
   const { id } = useParams();
-  const loader = useCallback(() => loadPublicPlayers(id), [id]);
+  const [params, setParams] = useSearchParams();
+  const sport: Sport =
+    params.get("sport") === "pickleball" ? "pickleball" : "badminton";
+  const loader = useCallback(() => loadPublicPlayers(id, sport), [id, sport]);
   const { data, loading, error, live, refresh } = usePublicData(loader, [
     "tournaments",
     "tournament_matches",
@@ -106,7 +116,7 @@ export function PublicPlayersPage() {
   return (
     <PublicLayout live={live}>
       {id && (
-        <Link className="back-link" to="/public/players">
+        <Link className="back-link" to={`/public/players?sport=${sport}`}>
           <ArrowLeft size={16} />
           All players
         </Link>
@@ -126,6 +136,20 @@ export function PublicPlayersPage() {
           </div>
         </section>
       )}
+      <div className="list-toolbar standalone">
+        <SportField
+          value={sport}
+          label="Player records sport"
+          onChange={(next) => {
+            const updated = new URLSearchParams(params);
+            updated.set("sport", next);
+            setParams(updated);
+          }}
+        />
+        <span className="muted">
+          {SPORT_LABELS[sport]} standings and match history
+        </span>
+      </div>
       {loading ? (
         <div className="card empty-state" role="status">
           Loading player records…
@@ -240,7 +264,7 @@ export function PublicPlayersPage() {
                 <Link
                   key={p.id}
                   className="card public-player-card"
-                  to={`/public/players/${p.id}`}
+                  to={`/public/players/${p.id}?sport=${sport}`}
                 >
                   <div className="card-header">
                     <span className="avatar large">

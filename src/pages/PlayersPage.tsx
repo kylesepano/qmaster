@@ -21,7 +21,9 @@ import {
   PlayerAvatar,
   dateLabel,
 } from "../components/ui";
-import type { Player } from "../types";
+import type { Player, Sport } from "../types";
+import { SPORT_LABELS } from "../types";
+import { SportField } from "../components/SportField";
 import { DeleteButton } from "../components/DeleteButton";
 import { playerRecords } from "../utilities/playerRecords";
 
@@ -36,7 +38,8 @@ export function PlayersPage() {
   const [name, setName] = useState(""),
     [photo, setPhoto] = useState<File | null>(null);
   const [removing, setRemoving] = useState<Player | null>(null);
-  const records = playerRecords(data);
+  const [sport, setSport] = useState<Sport>("badminton");
+  const records = playerRecords(data, sport);
   const players = data.players
     .filter(
       (p) =>
@@ -86,6 +89,11 @@ export function PlayersPage() {
             />
           </div>
           <div className="toolbar-right">
+            <SportField
+              value={sport}
+              onChange={setSport}
+              label="Player records sport"
+            />
             <span className="muted small-text">{players.length} players</span>
             <select
               aria-label="Player status"
@@ -162,7 +170,9 @@ export function PlayersPage() {
                     <strong>{records.get(p.id)?.losses ?? 0}</strong> Losses
                   </span>
                 </div>
-                <small className="muted">All finalized matches</small>
+                <small className="muted">
+                  {SPORT_LABELS[sport]} · All finalized matches
+                </small>
                 <p>
                   {p.archived
                     ? "Archived · History preserved"
@@ -174,7 +184,7 @@ export function PlayersPage() {
                 </span>
                 <Link
                   className="text-link player-profile-link"
-                  to={`/public/players/${p.id}`}
+                  to={`/public/players/${p.id}?sport=${sport}`}
                 >
                   Public profile & history →
                 </Link>

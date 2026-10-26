@@ -27,7 +27,7 @@ const links = [
 export function Brand({ to = "/" }: { to?: string }) {
   return (
     <Link to={to} className="brand">
-      <img src="/favicon.svg" alt="" />
+      <img src="/favicon.svg?v=2" alt="" />
       <span>
         Qmaster<span className="brand-dot">.</span>
       </span>
@@ -70,7 +70,7 @@ export function AppLayout() {
           <span className="workspace-mark">Q</span>
           <div>
             <strong>Your workspace</strong>
-            <small>Badminton management</small>
+            <small>Qmaster</small>
           </div>
         </div>
         <div className="nav-label">WORKSPACE</div>
@@ -191,9 +191,7 @@ export function AppLayout() {
           <Outlet />
         </main>
         <footer className="app-footer">
-          <span>
-            Qmaster <span className="muted">/</span> Badminton, organized.
-          </span>
+          <span>Qmaster</span>
           <span>One point at a time.</span>
         </footer>
       </div>

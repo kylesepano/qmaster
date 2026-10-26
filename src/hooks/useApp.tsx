@@ -107,6 +107,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       "queue_members",
       "queue_matches",
       "queue_teams",
+      "queue_rotations",
+      "queue_rotation_games",
     ]) {
       channel.on(
         "postgres_changes",

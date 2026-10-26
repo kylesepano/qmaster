@@ -14,6 +14,7 @@ import {
   gameWinner,
   prepareNextGame,
   scoringMax,
+  scoringRuleLabel,
 } from "../utilities/scoring";
 
 interface ScoreboardProps {
@@ -161,9 +162,7 @@ export function Scoreboard(props: ScoreboardProps) {
           <h2>Match scoreboard</h2>
           <p className="muted">
             {props.bestOf === 3 ? "Best of 3 games" : "Single game"} ·{" "}
-            {rule === "lenient_31"
-              ? "Lenient · First to 31 · No deuce"
-              : "21 points · Win by 2 · Cap at 30"}
+            {scoringRuleLabel(rule)}
           </p>
         </div>
         <span className="badge">
@@ -333,8 +332,8 @@ export function Scoreboard(props: ScoreboardProps) {
           {quick && (
             <div className="quick-score-panel">
               <p className="muted">
-                Enter each game in order. Completed games must have valid
-                badminton scores.
+                Enter each game in order. Completed games must have valid scores
+                for the selected rules.
               </p>
               {draft.map((game, index) => (
                 <div className="quick-score-row" key={game.game_no}>

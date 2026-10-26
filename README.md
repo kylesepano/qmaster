@@ -1,6 +1,6 @@
 # Qmaster
 
-A responsive badminton workspace for one organizer: register players, run casual queues on independent courts, create singles or doubles tournaments, and share live results with spectators.
+A responsive court-sports workspace for one organizer: use one player pool for badminton and pickleball, run casual queues on independent courts, create singles or doubles tournaments, and share live results with spectators.
 
 Built directly in this workspace with React, TypeScript, Vite, Tailwind CSS, React Router, Lucide, and Supabase. No application server or paid application dependency is required. Production data lives in PostgreSQL; the app never substitutes browser storage or sample records for the database.
 
@@ -26,7 +26,7 @@ Then complete the database/auth setup below and run:
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. The default home page is the public tournament directory, with a Queue sessions tab and an Admin login link. Restart the dev server after changing environment variables. Without credentials, public pages show empty event lists and admin sign-in is unavailable. Setup instructions live in this README; the five-step setup panel has been removed from the app. Once configured, organizer routes require sign-in.
+Open **http://127.0.0.1:5173**. The default home page is the public tournament directory, with Games, Players, Sessions and Tournaments navigation and an Admin login link. Restart the dev server after changing environment variables. Without credentials, public pages show empty event lists and admin sign-in is unavailable. Setup instructions live in this README; the five-step setup panel has been removed from the app. Once configured, organizer routes require sign-in.
 
 This is a Vite SPA. Start it through npm even if the folder is under Laragon; opening the folder through Apache alone does not run Vite.
 
@@ -42,18 +42,43 @@ This is a Vite SPA. Start it through npm even if the folder is under Laragon; op
 
 ### Each event
 
-| Area         | Required manual input                                                                 | Optional / automatic                                                           |
-| ------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Players      | Player name                                                                           | Optional profile image; no player account                                      |
-| Tournament   | Name, date, singles/doubles, bracket format, courts, one game/best of three           | Venue, description, private organizer banner                                   |
-| Participants | Select registered players; select exactly two per doubles team                        | Custom team name, manual seed order, randomized draw                           |
-| Queue        | Session name, singles/doubles, courts, scoring format, player roster                  | FIFO suggestions; manually override sides and rejoin preference                |
-| Match        | Select an available court and enter points or final game scores; confirm final result | Game/match winner, progression, court release and queue rotation are automatic |
-| Spectators   | Explicitly publish the tournament and share its link                                  | No spectator login; live updates and reconnect refresh                         |
+| Area         | Required manual input                                                                         | Optional / automatic                                                           |
+| ------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Players      | Player name                                                                                   | Optional profile image; no player account                                      |
+| Tournament   | Name, date, sport, scoring rules, singles/doubles/mixed, bracket format, courts, match format | Venue, description, private organizer banner                                   |
+| Participants | Select registered players; select exactly two per doubles team                                | Custom team name, manual seed order, randomized draw                           |
+| Queue        | Session name, sport, scoring rules, singles/doubles/mixed, courts, player roster              | FIFO suggestions; manually override sides and rejoin preference                |
+| Match        | Select an available court and enter points or final game scores; confirm final result         | Game/match winner, progression, court release and queue rotation are automatic |
+| Spectators   | Explicitly publish the tournament and share its link                                          | No spectator login; live updates and reconnect refresh                         |
 
 You never manually enter BYEs, later-round participants, upper/lower bracket progression, or the champion. Click **Generate draw**, then **Start tournament**, assign a ready match to a court, and score it.
 
 ## Supported formats and rules
+
+### Equal-play pickleball rotations (Normal sessions)
+
+Apply `supabase/migrations/202610260009_pickleball_rotations.sql` after 001–008. This adds a normal-session rotation, separate from tournament brackets. Existing badminton and bracket session workflows retain their behavior.
+
+1. Create a **Pickleball → Normal** session. Enter **Session hours** and **Estimated minutes per match**, defaulting to **15 minutes** including changeover/breaks. **Expected players** previews capacity before creating the session; the real registered roster determines the final plan. Hours and match estimate are saved with the session.
+2. Add everyone using the searchable player picker, then select **Generate balanced rotation & fill courts**. The planner assigns an equal **final total** of session matches to every registered player. Prior finalized matches in this session count toward that target, so players with fewer appearances receive more remaining games. Teammates and sides are randomized per game, independently of fixed team registrations; repeated pairings remain possible.
+3. Estimated capacity is `floor(hours × 60 / minutes per match) × min(courts, floor(players / players per match))`. The plan uses the highest feasible equal match count within this capacity; it leaves slots unused when needed to keep totals equal. Example: 8 doubles players, 2 courts, 2 hours and 15 minutes per match gives 16 matches, 8 per player. With 10 players, the same capacity fits 15 matches, 6 per player, leaving 1 slot unused.
+4. Available courts fill automatically. Finalizing a match calls the next available planned game. A player cannot play simultaneously in another queue or tournament. After a player becomes free in another event, **Fill available courts** retries waiting games. Per-player completed/target counts, overall progress and the planned match list are visible and survive reloads.
+5. While the plan exists, roster edits, manual starts and disabling rejoin are locked to protect equality. **Cancel remaining rotation** removes unstarted reservations while keeping started matches and results. Finish active games, edit hours/roster and regenerate to rebalance from the retained history. Ending a session early also stops future games; equal totals apply only when the full rotation finishes.
+
+The duration is a planning estimate, not an automatic session timer or a guarantee that play finishes within those hours. Actual match lengths, overlapping player availability and court idle time can extend the session. The estimate covers the whole match, including all games in a best-of-three. Some small rosters/time budgets or historical appearance counts cannot form complete equal-count matches; the app explains this instead of generating an unequal schedule. Plans support up to 256 players and 1,000 future matches. Private planned pairings are organizer-only; published actual games and results remain visible through the existing public session pages.
+
+### Badminton and pickleball
+
+Apply `supabase/migrations/202610260008_pickleball.sql` after migrations 001–007 before using the updated app. It defaults existing events to **Badminton** without changing their results. No additional credentials, player registrations, buckets or services are needed. The branding and browser title are now simply **Qmaster**, with a sport-neutral Q icon.
+
+- Select **Sport** when creating a session or tournament. Both sports use the same registered players, named teams, random/manual draws, elimination/round-robin formats, and court workflows. Generated session brackets inherit their session's sport and scoring rules.
+- For **Pickleball**, select **11 points — sudden death, no deuce** (11–10 wins) or **11 points — deuce, win by two** (11–10 remains live; 12–10 wins). Win-by-two has no sports-rule score cap, so extended results such as 32–30 are valid. This follows the usual [11-point, win-by-two rule](https://www.usapickleball.org/docs/rules/USAP-Rules-Summary.pdf); sudden death is the requested custom option. Scores are stored as nonnegative PostgreSQL integers.
+- The scoreboard records points entered by the organizer; it does not track serving turns, side-outs or automatically award rally points. Both pickleball options support one game or best of three, game-win notifications, automatic next-game reset to 0–0, and explicit match finalization.
+- Admin and public player pages have a **Player records sport** selector. Wins, losses, win rate, sorting, and public match history are calculated separately for each sport using the same player identity. Public records include only finalized matches from published events. BYEs do not count; walkovers do. Bracket session results count once as session matches.
+- Games, public events, and admin event lists have sport filters and event sport labels. Public navigation is **Games → Players → Sessions → Tournaments**; the default home remains Tournaments.
+- Tournament sport/scoring choices lock when participants are registered. Session rules are chosen at creation and cannot be reclassified after registration or play, protecting historical records. Badminton retains standard 21/cap-30 and lenient first-to-31 scoring.
+
+The sport migration and both scoring modes are covered by local PostgreSQL integration and browser fixture tests; a live Supabase project still requires applying the migration and validating its deployment.
 
 ### Queue-session teams and brackets
 

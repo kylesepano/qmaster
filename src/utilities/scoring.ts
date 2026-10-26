@@ -3,11 +3,37 @@ import type { Game, ScoringRule } from "../types";
 export type Side = "a" | "b";
 
 export const scoringRuleLabel = (rule?: ScoringRule) =>
-  rule === "lenient_31" ? "Lenient · First to 31" : "Standard · 21, cap 30";
+  rule === "pickleball_11_sudden_death"
+    ? "11 points · Sudden death · No deuce"
+    : rule === "pickleball_11_deuce"
+      ? "11 points · Win by 2 · No cap"
+      : rule === "lenient_31"
+        ? "Lenient · First to 31 · No deuce"
+        : "Standard · 21, cap 30";
 export const scoringMax = (rule?: ScoringRule) =>
-  rule === "lenient_31" ? 31 : 30;
+  rule === "pickleball_11_sudden_death"
+    ? 11
+    : rule === "pickleball_11_deuce"
+      ? 2147483647
+      : rule === "lenient_31"
+        ? 31
+        : 30;
 
 function scoreError(a: number, b: number, rule: ScoringRule): string | null {
+  if (rule === "pickleball_11_sudden_death" || rule === "pickleball_11_deuce") {
+    const max = scoringMax(rule);
+    if (![a, b].every(Number.isInteger) || a < 0 || b < 0 || a > max || b > max)
+      return rule === "pickleball_11_sudden_death"
+        ? "Sudden-death scores must be whole numbers from 0 to 11."
+        : "Scores must be nonnegative whole numbers within the supported integer range.";
+    if (rule === "pickleball_11_sudden_death")
+      return a === 11 && b === 11
+        ? "The first side to 11 wins. Both sides cannot finish at 11."
+        : null;
+    if (Math.max(a, b) > 11 && (Math.min(a, b) < 10 || Math.abs(a - b) > 2))
+      return "A pickleball game ends as soon as a side reaches 11 with a two-point lead.";
+    return null;
+  }
   if (rule === "lenient_31") {
     if (![a, b].every(Number.isInteger) || a < 0 || b < 0 || a > 31 || b > 31)
       return "Lenient scores must be whole numbers from 0 to 31.";
@@ -34,6 +60,14 @@ export function gameWinner(
   rule: ScoringRule = "standard_21",
 ): Side | null {
   if (scoreError(a, b, rule)) return null;
+  if (rule === "pickleball_11_sudden_death")
+    return a === 11 ? "a" : b === 11 ? "b" : null;
+  if (rule === "pickleball_11_deuce")
+    return Math.max(a, b) >= 11 && Math.abs(a - b) >= 2
+      ? a > b
+        ? "a"
+        : "b"
+      : null;
   if (rule === "lenient_31") return a === 31 ? "a" : b === 31 ? "b" : null;
   if ((Math.max(a, b) >= 21 && Math.abs(a - b) >= 2) || Math.max(a, b) === 30)
     return a > b ? "a" : "b";

@@ -90,10 +90,13 @@ export async function loadData(organizerId: string): Promise<AppData> {
     ),
   ]);
   const games = [...tournamentGames, ...queueGames];
-  const [rawTeams, teamPlayers] = await Promise.all([
-    rows("queue_teams", "session_id", queueIds),
-    rows("queue_team_players", "session_id", queueIds),
-  ]);
+  const [rawTeams, teamPlayers, queueRotations, queueRotationGames] =
+    await Promise.all([
+      rows("queue_teams", "session_id", queueIds),
+      rows("queue_team_players", "session_id", queueIds),
+      rows("queue_rotations", "session_id", queueIds),
+      rows("queue_rotation_games", "session_id", queueIds),
+    ]);
   const queueTeams = rawTeams.map((team) => ({
     ...team,
     player_ids: teamPlayers
@@ -117,6 +120,8 @@ export async function loadData(organizerId: string): Promise<AppData> {
     queueMatchPlayers,
     games,
     queueTeams,
+    queueRotations,
+    queueRotationGames,
   };
 }
 export async function loadPublicTournament(id: string) {
@@ -179,9 +184,13 @@ export async function loadPublicSessions(
     p_session_id: id ?? null,
   })) as PublicSession[];
 }
-export async function loadPublicPlayers(id?: string): Promise<PublicPlayer[]> {
+export async function loadPublicPlayers(
+  id?: string,
+  sport: import("../types").Sport = "badminton",
+): Promise<PublicPlayer[]> {
   if (!configured) return [];
   return (await rpc("get_public_players", {
     p_player_id: id ?? null,
+    p_sport: sport,
   })) as PublicPlayer[];
 }

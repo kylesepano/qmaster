@@ -158,10 +158,631 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610260008_pickleball.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610260009_pickleball_rotations.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await auth(owner);
 }, 30000);
 afterAll(async () => {
   await db?.close();
+});
+
+async function rotationFixture(n = 8, playType = "doubles", courts = 2) {
+  const event = await cleanupFixture();
+  await db.query("select delete_queue_session($1)", [event.sid]);
+  await db.query("select delete_tournament($1)", [event.tid]);
+  const players = [...event.playerIds];
+  for (let i = players.length; i < n; i++) {
+    const id = crypto.randomUUID();
+    players.push(id);
+    await db.query(
+      "insert into players(id,organizer_id,name) values($1,$2,$3)",
+      [id, event.uid, `Rotation ${i}`],
+    );
+  }
+  const roster = players.slice(0, n);
+  const sid = (
+    await db.query<{ id: string }>(
+      "insert into queue_sessions(organizer_id,name,play_type,court_count,best_of,sport,scoring_rule) values($1,'Balanced pickleball',$2,$3,1,'pickleball','pickleball_11_sudden_death') returning id",
+      [event.uid, playType, courts],
+    )
+  ).rows[0].id;
+  await db.query("select add_queue_players($1,$2::uuid[])", [sid, roster]);
+  return { ...event, sid, players: roster };
+}
+
+describe("Balanced normal pickleball rotations", () => {
+  it.each([
+    [8, "doubles", 2],
+    [9, "doubles", 2],
+    [10, "mixed", 2],
+    [5, "doubles", 3],
+    [6, "singles", 3],
+  ] as const)(
+    "gives %i %s players exactly equal match counts using %i courts",
+    async (n, playType, courts) => {
+      const event = await rotationFixture(n, playType, courts);
+      const generated = (
+        await db.query<{ n: number }>(
+          "select generate_pickleball_rotation($1,2,15) as n",
+          [event.sid],
+        )
+      ).rows[0].n;
+      const plan = (
+        await db.query<{ target_matches: number }>(
+          "select target_matches from queue_rotations where session_id=$1",
+          [event.sid],
+        )
+      ).rows[0];
+      const slots = playType === "singles" ? 2 : 4;
+      expect(generated * slots).toBe(n * plan.target_matches);
+      expect(generated).toBeLessThanOrEqual(
+        8 * Math.min(courts, Math.floor(n / slots)),
+      );
+      const planned = (
+        await db.query<{ player_ids: string[] }>(
+          "select player_ids from queue_rotation_games where session_id=$1",
+          [event.sid],
+        )
+      ).rows;
+      for (const game of planned)
+        expect(new Set(game.player_ids).size).toBe(slots);
+      for (const id of event.players)
+        expect(planned.filter((g) => g.player_ids.includes(id))).toHaveLength(
+          plan.target_matches,
+        );
+      expect(
+        (
+          await db.query<{ n: number }>(
+            "select count(*)::int as n from tournaments where queue_session_id=$1",
+            [event.sid],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      let completed = 0;
+      for (let pass = 0; pass < 100; pass++) {
+        const active = (
+          await db.query<{ id: string; version: number; court_no: number }>(
+            "select id,version,court_no from queue_matches where session_id=$1 and status='playing'",
+            [event.sid],
+          )
+        ).rows;
+        if (!active.length) break;
+        expect(active.length).toBeLessThanOrEqual(courts);
+        expect(new Set(active.map((m) => m.court_no)).size).toBe(active.length);
+        const overlaps = (
+          await db.query<{ n: number }>(
+            "select count(*)::int as n from (select mp.player_id from queue_match_players mp join queue_matches m on m.id=mp.match_id where m.session_id=$1 and m.status='playing' group by mp.player_id having count(*)>1) x",
+            [event.sid],
+          )
+        ).rows[0].n;
+        expect(overlaps).toBe(0);
+        for (const match of active) {
+          await db.query(
+            "select save_match_score($1,'queue',$2::jsonb,$3,true,null)",
+            [
+              match.id,
+              JSON.stringify([{ game_no: 1, score_a: 11, score_b: 8 }]),
+              match.version,
+            ],
+          );
+          completed++;
+        }
+      }
+      expect(completed).toBe(generated);
+      for (const id of event.players)
+        expect(
+          (
+            await db.query<{ n: number }>(
+              "select count(*)::int as n from queue_match_players mp join queue_matches m on m.id=mp.match_id where m.session_id=$1 and m.status='completed' and mp.player_id=$2",
+              [event.sid, id],
+            )
+          ).rows[0].n,
+        ).toBe(plan.target_matches);
+      expect(
+        (
+          await db.query<{ n: number }>(
+            "select auto_fill_session_courts($1) as n",
+            [event.sid],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      await db.query("select end_queue_session($1)", [event.sid]);
+      expect(
+        (
+          await db.query<{ status: string }>(
+            "select status from queue_sessions where id=$1",
+            [event.sid],
+          )
+        ).rows[0].status,
+      ).toBe("completed");
+      await auth(owner);
+    },
+  );
+
+  it("makes up unequal existing session appearances rather than adding equal extras", async () => {
+    const event = await rotationFixture();
+    const mid = (
+      await db.query<{ id: string }>(
+        "select start_queue_match($1,$2::uuid[],1) as id",
+        [event.sid, event.players.slice(0, 4)],
+      )
+    ).rows[0].id;
+    await db.query(
+      "select save_match_score($1,'queue',$2::jsonb,0,true,null)",
+      [mid, JSON.stringify([{ game_no: 1, score_a: 11, score_b: 2 }])],
+    );
+    await db.query("select generate_pickleball_rotation($1,1,15)", [event.sid]);
+    const plan = (
+      await db.query<{ target_matches: number }>(
+        "select target_matches from queue_rotations where session_id=$1",
+        [event.sid],
+      )
+    ).rows[0];
+    expect(plan.target_matches).toBe(4);
+    const planned = (
+      await db.query<{ player_ids: string[] }>(
+        "select player_ids from queue_rotation_games where session_id=$1",
+        [event.sid],
+      )
+    ).rows;
+    expect(planned).toHaveLength(7);
+    for (const [i, id] of event.players.entries())
+      expect(
+        planned.filter((g) => g.player_ids.includes(id)).length +
+          (i < 4 ? 1 : 0),
+      ).toBe(4);
+    await auth(owner);
+  });
+
+  it("protects roster, manual starts and owner access while allowing safe cancellation and cleanup", async () => {
+    const event = await rotationFixture();
+    await db.query("select generate_pickleball_rotation($1,1,15)", [event.sid]);
+    const member = (
+      await db.query<{ id: string }>(
+        "select id from queue_members where session_id=$1 limit 1",
+        [event.sid],
+      )
+    ).rows[0];
+    await expect(
+      db.query("select set_queue_rejoin($1,false)", [member.id]),
+    ).rejects.toThrow(/Cancel the balanced rotation/);
+    const extra = crypto.randomUUID();
+    await db.query(
+      "insert into players(id,organizer_id,name) values($1,$2,'Late player')",
+      [extra, event.uid],
+    );
+    await expect(
+      db.query("select add_queue_players($1,$2::uuid[])", [event.sid, [extra]]),
+    ).rejects.toThrow(/Cancel the balanced rotation/);
+    await expect(
+      db.query("select start_queue_match($1,$2::uuid[],1)", [
+        event.sid,
+        event.players.slice(0, 4),
+      ]),
+    ).rejects.toThrow(/Fill available courts/);
+    await expect(
+      db.query("select generate_pickleball_rotation($1,1,15)", [event.sid]),
+    ).rejects.toThrow(/existing rotation/);
+    await auth(other);
+    expect(
+      (
+        await db.query("select * from queue_rotations where session_id=$1", [
+          event.sid,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    await expect(
+      db.query("select auto_fill_session_courts($1)", [event.sid]),
+    ).rejects.toThrow(/not found/);
+    await expect(
+      db.query("select cancel_pickleball_rotation($1)", [event.sid]),
+    ).rejects.toThrow(/not found/);
+    await auth(null, "anon");
+    await expect(
+      db.query("select * from queue_rotation_games"),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      db.query("select generate_pickleball_rotation($1,1,15)", [event.sid]),
+    ).rejects.toThrow(/permission denied/);
+    await auth(event.uid);
+    await db.query("select cancel_pickleball_rotation($1)", [event.sid]);
+    expect(
+      (
+        await db.query("select * from queue_rotations where session_id=$1", [
+          event.sid,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    expect(
+      (
+        await db.query(
+          "select * from queue_matches where session_id=$1 and status='playing'",
+          [event.sid],
+        )
+      ).rows.length,
+    ).toBeGreaterThan(0);
+    await db.query("select add_queue_players($1,$2::uuid[])", [
+      event.sid,
+      [extra],
+    ]);
+    await db.query("select delete_queue_session($1)", [event.sid]);
+    expect(
+      (
+        await db.query(
+          "select * from queue_rotation_games where session_id=$1",
+          [event.sid],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    await auth(owner);
+  });
+
+  it("waits for players occupied in another event and rejects impossible time budgets atomically", async () => {
+    const event = await rotationFixture(4, "doubles", 1);
+    await expect(
+      db.query("select generate_pickleball_rotation($1,0.1,15)", [event.sid]),
+    ).rejects.toThrow(/hours/);
+    await expect(
+      db.query("select generate_pickleball_rotation($1,0.25,180)", [event.sid]),
+    ).rejects.toThrow(/Not enough time/);
+    expect(
+      (
+        await db.query("select * from queue_rotations where session_id=$1", [
+          event.sid,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    const sid = (
+      await db.query<{ id: string }>(
+        "insert into queue_sessions(organizer_id,name,play_type,court_count,best_of) values($1,'Other event','singles',1,1) returning id",
+        [event.uid],
+      )
+    ).rows[0].id;
+    await db.query("select add_queue_players($1,$2::uuid[])", [
+      sid,
+      event.players.slice(0, 2),
+    ]);
+    const mid = (
+      await db.query<{ id: string }>(
+        "select start_queue_match($1,$2::uuid[],1) as id",
+        [sid, event.players.slice(0, 2)],
+      )
+    ).rows[0].id;
+    await db.query("select generate_pickleball_rotation($1,1,15)", [event.sid]);
+    expect(
+      (
+        await db.query("select * from queue_matches where session_id=$1", [
+          event.sid,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    await db.query(
+      "select save_match_score($1,'queue',$2::jsonb,0,true,null)",
+      [mid, JSON.stringify([{ game_no: 1, score_a: 21, score_b: 10 }])],
+    );
+    expect(
+      (
+        await db.query<{ n: number }>(
+          "select auto_fill_session_courts($1) as n",
+          [event.sid],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    await db.query("select delete_queue_session($1)", [event.sid]);
+    expect(
+      (
+        await db.query("select * from queue_rotations where session_id=$1", [
+          event.sid,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    await auth(owner);
+  });
+});
+
+describe("Pickleball and shared player records", () => {
+  it.each(["pickleball_11_sudden_death", "pickleball_11_deuce"])(
+    "enforces %s in queue matches and publishes the sport",
+    async (rule) => {
+      const event = await cleanupFixture();
+      await db.query("select delete_queue_session($1)", [event.sid]);
+      const sid = (
+        await db.query<{ id: string }>(
+          "insert into queue_sessions(organizer_id,name,play_type,court_count,best_of,sport,scoring_rule) values($1,'Pickleball queue','singles',1,1,'pickleball',$2) returning id",
+          [event.uid, rule],
+        )
+      ).rows[0].id;
+      await db.query("select add_queue_players($1,$2::uuid[])", [
+        sid,
+        event.playerIds.slice(2),
+      ]);
+      const mid = (
+        await db.query<{ id: string }>(
+          "select start_queue_match($1,$2::uuid[],1) as id",
+          [sid, event.playerIds.slice(2)],
+        )
+      ).rows[0].id;
+      const save = (a: number, b: number, finalize = true, version = 0) =>
+        db.query("select save_match_score($1,'queue',$2::jsonb,$3,$4,null)", [
+          mid,
+          JSON.stringify([{ game_no: 1, score_a: a, score_b: b }]),
+          version,
+          finalize,
+        ]);
+      await expect(save(11, 11)).rejects.toThrow();
+      if (rule === "pickleball_11_deuce") {
+        await expect(save(13, 10)).rejects.toThrow(/ends as soon/);
+        await save(31, 30, false);
+        await save(32, 30, true, 1);
+      } else {
+        await expect(save(12, 10)).rejects.toThrow(/0 to 11/);
+        await save(11, 10);
+      }
+      await db.query("select publish_queue_session($1,true)", [sid]);
+      await auth(null, "anon");
+      const published = (
+        await db.query<{ data: any[] }>(
+          "select get_public_sessions($1) as data",
+          [sid],
+        )
+      ).rows[0].data[0];
+      expect(published).toMatchObject({
+        sport: "pickleball",
+        scoring_rule: rule,
+      });
+      expect(published.matches[0]).toMatchObject({
+        status: "completed",
+        winner_side: "a",
+      });
+      await auth(event.uid);
+      await expect(
+        db.query(
+          "update queue_sessions set sport='badminton',scoring_rule='standard_21' where id=$1",
+          [sid],
+        ),
+      ).rejects.toThrow(/before registering|permission denied/);
+      await auth(owner);
+    },
+  );
+
+  it("keeps shared-player public totals and history separate and excludes private results", async () => {
+    const event = await cleanupFixture();
+    await finish(event.mid, "b");
+    await db.query("select publish_tournament($1,true)", [event.tid]);
+    const tid = (
+      await db.query<{ id: string }>(
+        "insert into tournaments(organizer_id,name,event_date,play_type,court_count,best_of,format,sport,scoring_rule) values($1,'Pickleball cup','2026-10-26','singles',1,3,'single_elimination','pickleball','pickleball_11_deuce') returning id",
+        [event.uid],
+      )
+    ).rows[0].id;
+    const entries: string[] = [];
+    for (let i = 0; i < 2; i++)
+      entries.push(
+        (
+          await db.query<{ id: string }>(
+            "select register_entry($1,$2,$3::uuid[]) as id",
+            [tid, `Shared ${i}`, [event.playerIds[i]]],
+          )
+        ).rows[0].id,
+      );
+    await expect(
+      db.query("select update_tournament($1,$2::jsonb)", [
+        tid,
+        JSON.stringify({ sport: "badminton", scoring_rule: "standard_21" }),
+      ]),
+    ).rejects.toThrow(/before registering/);
+    await db.query("select generate_bracket($1,$2::jsonb)", [
+      tid,
+      JSON.stringify(generateBracket(entries, "single_elimination")),
+    ]);
+    await db.query("select start_tournament($1)", [tid]);
+    const mid = (
+      await db.query<{ id: string }>(
+        "select id from tournament_matches where tournament_id=$1",
+        [tid],
+      )
+    ).rows[0].id;
+    await db.query("select assign_tournament_court($1,1)", [mid]);
+    await db.query(
+      "select save_match_score($1,'tournament',$2::jsonb,1,false,null)",
+      [
+        mid,
+        JSON.stringify([
+          { game_no: 1, score_a: 11, score_b: 9 },
+          { game_no: 2, score_a: 0, score_b: 0 },
+        ]),
+      ],
+    );
+    await db.query(
+      "select save_match_score($1,'tournament',$2::jsonb,2,true,null)",
+      [
+        mid,
+        JSON.stringify([
+          { game_no: 1, score_a: 11, score_b: 9 },
+          { game_no: 2, score_a: 32, score_b: 30 },
+        ]),
+      ],
+    );
+    expect(
+      (
+        await db.query<{ status: string; champion_entry_id: string }>(
+          "select status,champion_entry_id from tournaments where id=$1",
+          [tid],
+        )
+      ).rows[0],
+    ).toEqual({ status: "completed", champion_entry_id: entries[0] });
+    const profile = async (sport: string) =>
+      (
+        await db.query<{ data: any[] }>(
+          "select get_public_players($1,$2) as data",
+          [event.playerIds[0], sport],
+        )
+      ).rows[0].data[0];
+    await auth(null, "anon");
+    expect(await profile("pickleball")).toMatchObject({
+      wins: 0,
+      losses: 0,
+      matches: [],
+    });
+    expect(await profile("badminton")).toMatchObject({ wins: 0, losses: 1 });
+    await auth(event.uid);
+    await db.query("select publish_tournament($1,true)", [tid]);
+    await auth(null, "anon");
+    const pickle = await profile("pickleball");
+    expect(pickle).toMatchObject({ sport: "pickleball", wins: 1, losses: 0 });
+    expect(pickle.matches).toHaveLength(1);
+    expect(pickle.matches[0]).toMatchObject({
+      event_id: tid,
+      sport: "pickleball",
+      result: "win",
+    });
+    const badminton = (
+      await db.query<{ data: any[] }>("select get_public_players($1) as data", [
+        event.playerIds[0],
+      ])
+    ).rows[0].data[0];
+    expect(badminton).toMatchObject({ sport: "badminton", wins: 0, losses: 1 });
+    expect(badminton.matches).toHaveLength(1);
+    await auth(owner);
+  });
+
+  it("inherits pickleball rules in random queue brackets and advances to a champion", async () => {
+    const event = await cleanupFixture();
+    const sid = (
+      await db.query<{ id: string }>(
+        "insert into queue_sessions(organizer_id,name,play_type,court_count,best_of,mode,bracket_format,sport,scoring_rule) values($1,'Pickleball teams','doubles',1,1,'bracket','single_elimination','pickleball','pickleball_11_sudden_death') returning id",
+        [event.uid],
+      )
+    ).rows[0].id;
+    const teams: string[] = [];
+    for (let i = 0; i < 2; i++)
+      teams.push(
+        (
+          await db.query<{ id: string }>(
+            "select register_queue_team($1,$2,$3::uuid[]) as id",
+            [sid, `Pickle team ${i}`, event.playerIds.slice(i * 2, i * 2 + 2)],
+          )
+        ).rows[0].id,
+      );
+    const tid = (
+      await db.query<{ id: string }>(
+        "select generate_queue_bracket($1,$2::uuid[],$3::jsonb) as id",
+        [
+          sid,
+          teams,
+          JSON.stringify(generateBracket(teams, "single_elimination")),
+        ],
+      )
+    ).rows[0].id;
+    expect(
+      (
+        await db.query(
+          "select sport,scoring_rule from tournaments where id=$1",
+          [tid],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      sport: "pickleball",
+      scoring_rule: "pickleball_11_sudden_death",
+    });
+    const match = (
+      await db.query<{ id: string; version: number }>(
+        "select id,version from tournament_matches where tournament_id=$1 and status='playing'",
+        [tid],
+      )
+    ).rows[0];
+    await db.query(
+      "select save_match_score($1,'tournament',$2::jsonb,$3,true,null)",
+      [
+        match.id,
+        JSON.stringify([{ game_no: 1, score_a: 11, score_b: 10 }]),
+        match.version,
+      ],
+    );
+    expect(
+      (
+        await db.query<{ status: string }>(
+          "select status from queue_sessions where id=$1",
+          [sid],
+        )
+      ).rows[0].status,
+    ).toBe("completed");
+    await db.query("select publish_queue_session($1,true)", [sid]);
+    await auth(null, "anon");
+    const player = (
+      await db.query<{ data: any[] }>(
+        "select get_public_players($1,'pickleball') as data",
+        [event.playerIds[0]],
+      )
+    ).rows[0].data[0];
+    expect(player).toMatchObject({ wins: 1, losses: 0 });
+    expect(player.matches[0]).toMatchObject({
+      event_id: sid,
+      kind: "queue",
+      sport: "pickleball",
+    });
+    await auth(owner);
+  });
+
+  it("rejects mismatched sport/scoring combinations and allows switching an empty draft", async () => {
+    const event = await cleanupFixture();
+    for (const table of ["queue_sessions", "tournaments"]) {
+      const extras = table === "tournaments" ? ",event_date,format" : "";
+      const values =
+        table === "tournaments" ? ",'2026-10-26','single_elimination'" : "";
+      await expect(
+        db.query(
+          `insert into ${table}(organizer_id,name,play_type,court_count,best_of,sport,scoring_rule${extras}) values($1,'Bad rule','singles',1,1,'pickleball','standard_21'${values})`,
+          [event.uid],
+        ),
+      ).rejects.toThrow(/sport_scoring_check/);
+    }
+    const tid = (
+      await db.query<{ id: string }>(
+        "insert into tournaments(organizer_id,name,event_date,play_type,court_count,best_of,format) values($1,'Empty draft','2026-10-26','singles',1,1,'single_elimination') returning id",
+        [event.uid],
+      )
+    ).rows[0].id;
+    await db.query("select update_tournament($1,$2::jsonb)", [
+      tid,
+      JSON.stringify({
+        sport: "pickleball",
+        scoring_rule: "pickleball_11_deuce",
+      }),
+    ]);
+    expect(
+      (
+        await db.query<{ sport: string }>(
+          "select sport from tournaments where id=$1",
+          [tid],
+        )
+      ).rows[0].sport,
+    ).toBe("pickleball");
+    await auth(other);
+    await expect(
+      db.query("select update_tournament($1,$2::jsonb)", [
+        tid,
+        JSON.stringify({ sport: "badminton", scoring_rule: "standard_21" }),
+      ]),
+    ).rejects.toThrow(/not found/);
+    await auth(owner);
+  });
 });
 
 describe("Selectable scoring rules", () => {

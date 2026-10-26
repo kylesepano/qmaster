@@ -12,7 +12,8 @@ import { PublicLayout } from "../components/PublicLayout";
 import { Badge, EmptyState, dateLabel } from "../components/ui";
 import { loadPublicDirectory, loadPublicSessions } from "../services/api";
 import { usePublicData } from "../hooks/usePublicData";
-import { FORMAT_LABELS } from "../types";
+import { FORMAT_LABELS, SPORT_LABELS, type Sport } from "../types";
+import { SportFilter } from "../components/SportField";
 import { scoringRuleLabel } from "../utilities/scoring";
 
 export function PublicHomePage() {
@@ -20,6 +21,7 @@ export function PublicHomePage() {
   const sessionsView = params.get("view") === "sessions";
   const status = params.get("status") ?? "all";
   const search = params.get("q") ?? "";
+  const sport = (params.get("sport") ?? "all") as Sport | "all";
   const loader = useCallback(
     async () =>
       sessionsView
@@ -39,7 +41,8 @@ export function PublicHomePage() {
     else next.delete(key);
     setParams(next, { replace: true });
   }
-  const visible = (item: { name: string; status: string }) =>
+  const visible = (item: { name: string; status: string; sport?: Sport }) =>
+    (sport === "all" || (item.sport ?? "badminton") === sport) &&
     item.name.toLowerCase().includes(search.toLowerCase()) &&
     (status === "all" || item.status === status);
   const rank: Record<string, number> = { ongoing: 0, draft: 1, completed: 2 };
@@ -73,6 +76,10 @@ export function PublicHomePage() {
         </div>
       </section>
       <div className="list-toolbar standalone public-filters">
+        <SportFilter
+          value={sport}
+          onChange={(value) => filter("sport", value)}
+        />
         <div className="tab-buttons" aria-label="Event status">
           {[
             ["all", "All events"],
@@ -156,6 +163,7 @@ export function PublicHomePage() {
                     </div>
                     <h2>{session.name}</h2>
                     <p className="muted">
+                      {SPORT_LABELS[session.sport ?? "badminton"]} ·{" "}
                       {session.play_type} ·{" "}
                       {session.best_of === 3 ? "Best of 3" : "One game"} ·{" "}
                       {scoringRuleLabel(session.scoring_rule)}
@@ -244,6 +252,7 @@ export function PublicHomePage() {
                     </div>
                     <h2>{t.name}</h2>
                     <p className="muted">
+                      {SPORT_LABELS[t.sport ?? "badminton"]} ·{" "}
                       {FORMAT_LABELS[t.format]} · {t.play_type}
                     </p>
                     <div className="tournament-meta">

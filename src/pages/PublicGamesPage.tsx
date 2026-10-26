@@ -1,4 +1,7 @@
 import { Link } from "react-router-dom";
+import { useState } from "react";
+import { SPORT_LABELS, type Sport } from "../types";
+import { SportFilter } from "../components/SportField";
 import { PublicLayout } from "../components/PublicLayout";
 import { Badge, EmptyState } from "../components/ui";
 import { usePublicData } from "../hooks/usePublicData";
@@ -33,6 +36,7 @@ async function loadGames() {
           .map((m) => ({
             id: m.id,
             event: s.name,
+            sport: s.sport ?? "badminton",
             href: `/public/sessions/${s.id}`,
             court: m.court_no,
             a: m.side_a,
@@ -47,6 +51,7 @@ async function loadGames() {
             .map((m) => ({
               id: m.id,
               event: t.tournament!.name,
+              sport: t.tournament!.sport ?? "badminton",
               href: `/public/tournaments/${t.tournament!.id}`,
               court: m.court_no,
               a: t.entries.find((e) => e.id === m.entry_a_id)?.name ?? "Side A",
@@ -59,6 +64,7 @@ async function loadGames() {
 }
 
 export function PublicGamesPage() {
+  const [sport, setSport] = useState<Sport | "all">("all");
   const { data, loading, error, live, refresh } = usePublicData(loadGames, [
     "queue_sessions",
     "queue_matches",
@@ -67,6 +73,7 @@ export function PublicGamesPage() {
     "tournament_matches",
     "match_games",
   ]);
+  const games = data?.filter((m) => sport === "all" || m.sport === sport);
   return (
     <PublicLayout live={live}>
       <section className="spectator-hero">
@@ -78,6 +85,9 @@ export function PublicGamesPage() {
           </p>
         </div>
       </section>
+      <div className="list-toolbar standalone">
+        <SportFilter value={sport} onChange={setSport} />
+      </div>
       {loading ? (
         <div className="card empty-state" role="status">
           Loading games…
@@ -89,7 +99,7 @@ export function PublicGamesPage() {
             Try again
           </button>
         </div>
-      ) : !data?.length ? (
+      ) : !games?.length ? (
         <section className="card">
           <EmptyState title="No live games right now">
             Games appear here when a match starts in a published session or
@@ -98,13 +108,15 @@ export function PublicGamesPage() {
         </section>
       ) : (
         <div className="grid-3">
-          {data.map((m) => (
+          {games.map((m) => (
             <Link key={m.id} to={m.href} className="card public-event-card">
               <div className="card-header">
                 <h2>{m.event}</h2>
                 <Badge tone="green">Playing</Badge>
               </div>
-              <p className="muted">Court {m.court}</p>
+              <p className="muted">
+                {SPORT_LABELS[m.sport]} · Court {m.court}
+              </p>
               {(["a", "b"] as const).map((side) => (
                 <div className="public-score-row" key={side}>
                   <strong>{m[side]}</strong>

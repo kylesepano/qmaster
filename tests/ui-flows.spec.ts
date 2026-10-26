@@ -9,6 +9,7 @@ import type {
   PublicPlayer,
 } from "../src/types";
 import { resolveBracket } from "../src/utilities/brackets";
+import { estimateRotation } from "../src/utilities/rotation";
 
 const uid = "10000000-0000-4000-8000-000000000001";
 const queueId = "20000000-0000-4000-8000-000000000001";
@@ -45,7 +46,9 @@ test("public Games navigation shows only live published matches", async ({
   await expect(
     page.getByRole("heading", { name: "Club singles" }),
   ).toBeVisible();
-  await expect(page.getByText("Court 2", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Badminton · Court 2", { exact: true }),
+  ).toBeVisible();
   data.tournaments[0].published = false;
   await page.reload();
   await expect(
@@ -151,6 +154,63 @@ interface Harness {
   storageFail?: boolean;
   blockPurge?: boolean;
   failPlayerSave?: boolean;
+}
+
+function fillRotationCourts(data: AppData, sessionId: string) {
+  const session = data.queueSessions.find((s) => s.id === sessionId)!;
+  let count = 0;
+  for (let court = 1; court <= session.court_count; court++) {
+    if (
+      data.queueMatches.some(
+        (m) =>
+          m.session_id === sessionId &&
+          m.court_no === court &&
+          m.status === "playing",
+      )
+    )
+      continue;
+    const busy = new Set(
+      data.queueMatchPlayers
+        .filter((p) =>
+          data.queueMatches.some(
+            (m) => m.id === p.match_id && m.status === "playing",
+          ),
+        )
+        .map((p) => p.player_id),
+    );
+    const game = data.queueRotationGames?.find(
+      (g) =>
+        g.session_id === sessionId &&
+        !g.match_id &&
+        g.player_ids.every((id) => !busy.has(id)),
+    );
+    if (!game) continue;
+    const id = crypto.randomUUID();
+    game.match_id = id;
+    data.queueMatches.push({
+      id,
+      session_id: sessionId,
+      court_no: court,
+      status: "playing",
+      started_at: timestamp,
+      completed_at: null,
+      winner_side: null,
+      walkover: false,
+      version: 0,
+    });
+    for (const [i, pid] of game.player_ids.entries()) {
+      data.queueMatchPlayers.push({
+        match_id: id,
+        player_id: pid,
+        side: i < game.player_ids.length / 2 ? "a" : "b",
+      });
+      data.queueMembers.find(
+        (m) => m.session_id === sessionId && m.player_id === pid,
+      )!.status = "playing";
+    }
+    count++;
+  }
+  return count;
 }
 async function mockSupabase(
   page: Page,
@@ -304,6 +364,77 @@ async function mockSupabase(
       const name = path.split("/").at(-1)!;
       const args = request.postDataJSON() as Record<string, any>;
       harness.calls.push({ name, args });
+      if (name === "generate_pickleball_rotation") {
+        const s = data.queueSessions.find((s) => s.id === args.p_session_id)!;
+        const roster = data.queueMembers
+          .filter((m) => m.session_id === s.id)
+          .map((m) => m.player_id);
+        const before = roster.map(
+          (id) =>
+            data.queueMatchPlayers.filter(
+              (p) =>
+                p.player_id === id &&
+                data.queueMatches.some(
+                  (m) =>
+                    m.session_id === s.id &&
+                    m.id === p.match_id &&
+                    m.status === "completed",
+                ),
+            ).length,
+        );
+        const estimate = estimateRotation(
+          args.p_hours,
+          args.p_minutes,
+          s.court_count,
+          s.play_type,
+          before,
+        );
+        if (estimate.error) return json({ message: estimate.error }, 400);
+        s.session_hours = args.p_hours;
+        s.estimated_match_minutes = args.p_minutes;
+        data.queueRotations ??= [];
+        data.queueRotationGames ??= [];
+        data.queueRotations.push({
+          id: crypto.randomUUID(),
+          session_id: s.id,
+          player_ids: roster,
+          target_matches: estimate.target,
+          created_at: timestamp,
+        });
+        const remaining = before.map((n) => estimate.target - n),
+          slots = s.play_type === "singles" ? 2 : 4;
+        for (let position = 1; position <= estimate.matches; position++) {
+          const indices = remaining
+            .map((_, i) => i)
+            .filter((i) => remaining[i] > 0)
+            .sort((a, b) => remaining[b] - remaining[a] || a - b)
+            .slice(0, slots);
+          indices.forEach((i) => remaining[i]--);
+          data.queueRotationGames.push({
+            id: crypto.randomUUID(),
+            session_id: s.id,
+            position,
+            player_ids: indices.map((i) => roster[i]),
+            match_id: null,
+          });
+        }
+        fillRotationCourts(data, s.id);
+        return json(estimate.matches);
+      }
+      if (name === "cancel_pickleball_rotation") {
+        data.queueRotations = data.queueRotations?.filter(
+          (r) => r.session_id !== args.p_session_id,
+        );
+        data.queueRotationGames = data.queueRotationGames?.filter(
+          (g) => g.session_id !== args.p_session_id,
+        );
+        return json(null);
+      }
+      if (
+        name === "auto_fill_session_courts" &&
+        data.queueRotations?.some((r) => r.session_id === args.p_session_id)
+      )
+        return json(fillRotationCourts(data, args.p_session_id));
       if (name === "enqueue_media_cleanup") {
         enqueue(args.p_path);
         return json(null);
@@ -363,6 +494,7 @@ async function mockSupabase(
           court_count: session.court_count,
           best_of: session.best_of,
           scoring_rule: session.scoring_rule,
+          sport: session.sport ?? "badminton",
           format: session.bracket_format ?? "single_elimination",
           status: "ongoing",
           published: !!session.published,
@@ -431,7 +563,7 @@ async function mockSupabase(
         return json(null);
       }
       if (name === "get_public_players") {
-        const profiles =
+        const profiles: PublicPlayer[] =
           harness.publicPlayers ??
           data.players.map((p) => ({
             id: p.id,
@@ -443,6 +575,9 @@ async function mockSupabase(
           }));
         return json(
           profiles
+            .filter(
+              (p) => (p.sport ?? "badminton") === (args.p_sport ?? "badminton"),
+            )
             .filter((p) => !args.p_player_id || p.id === args.p_player_id)
             .map((p) => ({ ...p, matches: args.p_player_id ? p.matches : [] })),
         );
@@ -485,6 +620,7 @@ async function mockSupabase(
               court_count: s.court_count,
               best_of: s.best_of,
               scoring_rule: s.scoring_rule ?? "standard_21",
+              sport: s.sport ?? "badminton",
               status: s.status,
               created_at: s.created_at,
               waiting: data.queueMembers
@@ -785,6 +921,12 @@ async function mockSupabase(
               winner === "a" ? match.entry_b_id : match.entry_a_id;
           }
         }
+        if (
+          args.p_finalize &&
+          "session_id" in match &&
+          data.queueRotations?.some((r) => r.session_id === match.session_id)
+        )
+          fillRotationCourts(data, match.session_id);
         return json(null);
       }
       return json(null);
@@ -817,6 +959,8 @@ async function mockSupabase(
     const tables: Record<string, unknown[]> = {
       media_cleanup: harness.mediaJobs ?? [],
       queue_teams: data.queueTeams ?? [],
+      queue_rotations: data.queueRotations ?? [],
+      queue_rotation_games: data.queueRotationGames ?? [],
       queue_team_players: (data.queueTeams ?? []).flatMap((t) =>
         t.player_ids.map((id) => ({
           id: `${t.id}-${id}`,
@@ -1622,6 +1766,328 @@ test("public player directory and individual history display wins, losses and te
   await expect(
     page.getByRole("heading", { name: "Mixed cup", exact: true }),
   ).toHaveCount(0);
+});
+
+test("normal pickleball creation estimates equal games from hours, courts and expected players", async ({
+  page,
+}) => {
+  const harness: Harness = { data: fixture(), calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto("/queue?new=1");
+  await page
+    .getByRole("combobox", { name: "Sport", exact: true })
+    .selectOption("pickleball");
+  await expect(
+    page.getByLabel("Estimated minutes per match", { exact: true }),
+  ).toHaveValue("15");
+  await page.getByLabel("Number of courts", { exact: true }).fill("2");
+  await page
+    .getByLabel("Expected players (estimate only)", { exact: true })
+    .fill("10");
+  await expect(
+    page.getByText("15 planned matches · 6 total matches per player", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByLabel("Session hours", { exact: true }).fill("1");
+  await expect(
+    page.getByText("5 planned matches · 2 total matches per player", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Estimated minutes per match", { exact: true })
+    .fill("10");
+  await expect(
+    page.getByText("10 planned matches · 4 total matches per player", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Session name", { exact: true })
+    .fill("Fair pickleball night");
+  await page
+    .getByRole("button", { name: "Create session", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Fair pickleball night", exact: true }),
+  ).toBeVisible();
+  expect(
+    harness.data.queueSessions.find((s) => s.name === "Fair pickleball night"),
+  ).toMatchObject({
+    sport: "pickleball",
+    mode: "normal",
+    session_hours: 1,
+    estimated_match_minutes: 10,
+  });
+});
+
+test("normal pickleball rotates random members, shows progress, persists and cancels only unstarted games", async ({
+  page,
+}) => {
+  const data = fixture();
+  data.queueSessions[0].sport = "pickleball";
+  data.queueSessions[0].scoring_rule = "pickleball_11_sudden_death";
+  const harness: Harness = { data, calls: [] };
+  await mockSupabase(page, harness);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/queue/${queueId}`);
+  await page.getByLabel("Session hours", { exact: true }).fill("1");
+  await expect(
+    page.getByText("3 planned matches · 2 total matches per player", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "Generate balanced rotation & fill courts",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText("2 total matches per player", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".court-card.occupied")).toHaveCount(1);
+  await expect(
+    page.getByRole("combobox", {
+      name: "Players to add to queue",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Call next players", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByLabel("Session hours", { exact: true }),
+  ).toBeDisabled();
+  await page.reload();
+  await expect(page.getByLabel("Session hours", { exact: true })).toHaveValue(
+    "1",
+  );
+  const first = data.queueMatches.find((m) => m.status === "playing")!;
+  await page.goto(`/matches/${first.id}`);
+  await page
+    .getByRole("button", { name: "Quick score entry", exact: true })
+    .click();
+  await page.locator(".quick-score-row input").nth(0).fill("11");
+  await page.locator(".quick-score-row input").nth(1).fill("8");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Finalize match", exact: true })
+    .click();
+  await expect
+    .poll(
+      () => data.queueMatches.filter((m) => m.status === "completed").length,
+    )
+    .toBe(1);
+  await expect
+    .poll(() => data.queueMatches.filter((m) => m.status === "playing").length)
+    .toBe(1);
+  await page.goto(`/queue/${queueId}`);
+  await expect(
+    page.getByText(/1 of 3 planned matches completed/),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page
+    .getByRole("button", { name: "Cancel remaining rotation", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Confirm", exact: true })
+    .click();
+  await expect(
+    page.getByRole("combobox", {
+      name: "Players to add to queue",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(data.queueRotationGames).toHaveLength(0);
+  expect(data.queueMatches).toHaveLength(2);
+});
+
+test("pickleball sessions and tournaments save their sport and expose only compatible scoring rules", async ({
+  page,
+}) => {
+  const harness: Harness = { data: fixture(), calls: [] };
+  await mockSupabase(page, harness);
+  await page.goto("/queue?new=1");
+  await page
+    .getByRole("combobox", { name: "Sport", exact: true })
+    .selectOption("pickleball");
+  const scoring = page.getByRole("combobox", {
+    name: "Scoring rules",
+    exact: true,
+  });
+  await expect(scoring).toHaveValue("pickleball_11_sudden_death");
+  await expect(scoring.locator("option")).toHaveCount(2);
+  await scoring.selectOption("pickleball_11_deuce");
+  await page
+    .getByLabel("Session name", { exact: true })
+    .fill("Pickleball night");
+  await page
+    .getByRole("button", { name: "Create session", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Pickleball night", exact: true }),
+  ).toBeVisible();
+  expect(
+    harness.data.queueSessions.find((s) => s.name === "Pickleball night"),
+  ).toMatchObject({ sport: "pickleball", scoring_rule: "pickleball_11_deuce" });
+  await page.goto("/tournaments/new");
+  await page
+    .getByRole("combobox", { name: "Sport", exact: true })
+    .selectOption("pickleball");
+  await expect(scoring).toHaveValue("pickleball_11_sudden_death");
+  await page
+    .getByLabel("Tournament name", { exact: true })
+    .fill("Pickleball open");
+  await page
+    .getByRole("button", { name: "Create tournament", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Pickleball open", exact: true }),
+  ).toBeVisible();
+  expect(
+    harness.data.tournaments.find((t) => t.name === "Pickleball open"),
+  ).toMatchObject({
+    sport: "pickleball",
+    scoring_rule: "pickleball_11_sudden_death",
+  });
+  await expect(page).toHaveTitle("Qmaster");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Sport", exact: true })
+    .selectOption("badminton");
+  await expect(scoring).toHaveValue("standard_21");
+});
+
+for (const rule of [
+  "pickleball_11_sudden_death",
+  "pickleball_11_deuce",
+] as const) {
+  test(`pickleball scoreboard handles ${rule} and resets the next game`, async ({
+    page,
+  }) => {
+    const data = fixture();
+    data.tournaments[0].sport = "pickleball";
+    data.tournaments[0].scoring_rule = rule;
+    data.tournamentMatches[0].status = "playing";
+    data.tournamentMatches[0].court_no = 1;
+    data.games = [
+      {
+        id: crypto.randomUUID(),
+        tournament_match_id: tournamentMatchId,
+        queue_match_id: null,
+        game_no: 1,
+        score_a: 10,
+        score_b: 10,
+      },
+    ];
+    await mockSupabase(page, { data, calls: [] });
+    await page.goto(`/matches/${tournamentMatchId}`);
+    await page
+      .getByRole("button", { name: "Add point to Alex", exact: true })
+      .click();
+    if (rule === "pickleball_11_deuce") {
+      await expect(page.locator(".score-number")).toHaveText(["11", "10"]);
+      await expect(page.getByText(/Game 1 won by Alex/)).toHaveCount(0);
+      await page
+        .getByRole("button", { name: "Add point to Alex", exact: true })
+        .click();
+    }
+    await expect(page.getByText(/Game 1 won by Alex/)).toBeVisible();
+    await expect(page.locator(".score-number")).toHaveText(["0", "0"]);
+    expect(data.games.map((g) => [g.score_a, g.score_b])).toEqual([
+      [rule === "pickleball_11_deuce" ? 12 : 11, 10],
+      [0, 0],
+    ]);
+  });
+}
+
+test("public player records switch sports without mixing history or duplicating players", async ({
+  page,
+}) => {
+  const data = fixture();
+  const common = { id: playerId(0), name: "Alex", archived: false };
+  const harness: Harness = {
+    data,
+    calls: [],
+    publicPlayers: [
+      { ...common, sport: "badminton", wins: 2, losses: 1, matches: [] },
+      {
+        ...common,
+        sport: "pickleball",
+        wins: 1,
+        losses: 0,
+        matches: [
+          {
+            id: queueMatchId,
+            event_id: queueId,
+            event_name: "Pickleball night",
+            kind: "queue",
+            sport: "pickleball",
+            play_type: "doubles",
+            completed_at: timestamp,
+            court_no: 1,
+            walkover: false,
+            side_a: "Dink Kings",
+            side_b: "Kitchen Crew",
+            players_a: ["Alex", "Blair"],
+            players_b: ["Casey", "Drew"],
+            result: "win",
+            games: [{ game_no: 1, score_a: 11, score_b: 10 }],
+          },
+        ],
+      },
+    ],
+  };
+  await mockSupabase(page, harness, false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/public/players");
+  await expect(page.locator(".public-player-record strong")).toHaveText([
+    "2",
+    "1",
+    "3",
+    "67%",
+  ]);
+  await page
+    .getByRole("combobox", { name: "Player records sport", exact: true })
+    .selectOption("pickleball");
+  await expect(page.locator(".public-player-record strong")).toHaveText([
+    "1",
+    "0",
+    "1",
+    "100%",
+  ]);
+  await page
+    .getByRole("link")
+    .filter({ has: page.getByRole("heading", { name: "Alex", exact: true }) })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Pickleball night", exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/sport=pickleball/);
+  await page
+    .getByRole("combobox", { name: "Player records sport", exact: true })
+    .selectOption("badminton");
+  await expect(
+    page.getByRole("heading", { name: "Pickleball night", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator(".public-player-record strong")).toHaveText([
+    "2",
+    "1",
+    "3",
+    "67%",
+  ]);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
 });
 
 test("new sessions and tournaments save the selected scoring rules", async ({

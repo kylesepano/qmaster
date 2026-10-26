@@ -48,7 +48,7 @@ export function PublicLayout({
         </Link>
       </header>
       <main className="public-content">{children}</main>
-      <footer className="public-footer">Qmaster · Badminton, organized.</footer>
+      <footer className="public-footer">Qmaster</footer>
     </div>
   );
 }

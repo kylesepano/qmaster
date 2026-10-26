@@ -1,5 +1,14 @@
 export type PlayType = "singles" | "doubles" | "mixed";
-export type ScoringRule = "standard_21" | "lenient_31";
+export type Sport = "badminton" | "pickleball";
+export const SPORT_LABELS: Record<Sport, string> = {
+  badminton: "Badminton",
+  pickleball: "Pickleball",
+};
+export type ScoringRule =
+  | "standard_21"
+  | "lenient_31"
+  | "pickleball_11_sudden_death"
+  | "pickleball_11_deuce";
 export type BracketFormat =
   "single_elimination" | "double_elimination" | "round_robin";
 export type EventStatus = "draft" | "ongoing" | "completed";
@@ -15,6 +24,7 @@ export interface Player {
   created_at: string;
 }
 export interface Tournament {
+  sport?: Sport;
   id: string;
   organizer_id: string;
   name: string;
@@ -67,6 +77,9 @@ export interface TournamentMatch {
   version: number;
 }
 export interface QueueSession {
+  session_hours?: number;
+  estimated_match_minutes?: number;
+  sport?: Sport;
   id: string;
   organizer_id: string;
   name: string;
@@ -87,6 +100,20 @@ export interface QueueTeam {
   position: number;
   player_ids: string[];
 }
+export interface QueueRotation {
+  id: string;
+  session_id: string;
+  player_ids: string[];
+  target_matches: number;
+  created_at: string;
+}
+export interface QueueRotationGame {
+  id: string;
+  session_id: string;
+  position: number;
+  player_ids: string[];
+  match_id: string | null;
+}
 export interface PublicSessionMatch {
   id: string;
   status: "playing" | "completed";
@@ -102,6 +129,7 @@ export interface PublicSessionMatch {
   games: Game[];
 }
 export interface PublicSession {
+  sport?: Sport;
   id: string;
   name: string;
   play_type: PlayType;
@@ -146,6 +174,7 @@ export interface QueueMatch {
   team_b_name?: string | null;
 }
 export interface PublicPlayerMatch {
+  sport?: Sport;
   id: string;
   event_id: string;
   event_name: string;
@@ -162,6 +191,7 @@ export interface PublicPlayerMatch {
   games: Game[];
 }
 export interface PublicPlayer {
+  sport?: Sport;
   id: string;
   name: string;
   archived: boolean;
@@ -190,6 +220,8 @@ export interface AppData {
   queueMatchPlayers: QueueMatchPlayer[];
   games: MatchGame[];
   queueTeams?: QueueTeam[];
+  queueRotations?: QueueRotation[];
+  queueRotationGames?: QueueRotationGame[];
 }
 export const EMPTY_DATA: AppData = {
   players: [],
@@ -202,6 +234,8 @@ export const EMPTY_DATA: AppData = {
   queueMatchPlayers: [],
   games: [],
   queueTeams: [],
+  queueRotations: [],
+  queueRotationGames: [],
 };
 export const FORMAT_LABELS: Record<BracketFormat, string> = {
   single_elimination: "Single elimination",

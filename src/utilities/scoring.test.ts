@@ -8,6 +8,73 @@ const games = (...scores: [number, number][]) =>
     score_b,
   }));
 
+describe("pickleball scoring", () => {
+  it.each([
+    [11, 0],
+    [11, 9],
+    [11, 10],
+  ])("ends sudden death at %i–%i", (a, b) => {
+    expect(gameWinner(a, b, "pickleball_11_sudden_death")).toBe("a");
+    expect(gameWinner(b, a, "pickleball_11_sudden_death")).toBe("b");
+  });
+  it.each([
+    [11, 11],
+    [12, 10],
+    [11, -1],
+    [10.5, 8],
+  ])("rejects invalid sudden-death scores %i–%i", (a, b) => {
+    expect(
+      evaluateMatch(games([a, b]), 1, "pickleball_11_sudden_death").error,
+    ).toBeTruthy();
+  });
+  it.each([
+    [11, 0],
+    [11, 9],
+    [12, 10],
+    [32, 30],
+    [102, 100],
+  ])("recognizes win-by-two at %i–%i without a badminton cap", (a, b) => {
+    expect(
+      evaluateMatch(games([a, b]), 1, "pickleball_11_deuce"),
+    ).toMatchObject({ winner: "a", error: null });
+  });
+  it.each([
+    [10, 10],
+    [11, 10],
+    [11, 11],
+    [31, 30],
+  ])("keeps deuce at %i–%i in play", (a, b) => {
+    expect(
+      evaluateMatch(games([a, b]), 1, "pickleball_11_deuce"),
+    ).toMatchObject({ winner: null, error: null });
+  });
+  it.each([
+    [12, 9],
+    [13, 10],
+    [32, 29],
+    [-1, 0],
+    [11, 9.5],
+  ])("rejects invalid or overshot deuce scores %i–%i", (a, b) => {
+    expect(
+      evaluateMatch(games([a, b]), 1, "pickleball_11_deuce").error,
+    ).toBeTruthy();
+  });
+  it("resets to zero after a pickleball game and ends a best of three", () => {
+    expect(
+      prepareNextGame(games([11, 10]), 3, "pickleball_11_sudden_death"),
+    ).toEqual(games([11, 10], [0, 0]));
+    expect(
+      prepareNextGame(games([11, 10]), 3, "pickleball_11_deuce"),
+    ).toHaveLength(1);
+    expect(prepareNextGame(games([12, 10]), 3, "pickleball_11_deuce")).toEqual(
+      games([12, 10], [0, 0]),
+    );
+    expect(
+      evaluateMatch(games([11, 9], [12, 10]), 3, "pickleball_11_deuce"),
+    ).toMatchObject({ winner: "a", gamesA: 2, error: null });
+  });
+});
+
 describe("badminton scoring", () => {
   it.each([
     [21, 0],

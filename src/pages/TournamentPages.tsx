@@ -37,12 +37,14 @@ import { BracketView, Standings } from "../components/BracketView";
 import { CourtCard } from "../components/CourtCard";
 import { MatchCard } from "../components/MatchCard";
 import { generateBracket, shuffleEntries } from "../utilities/brackets";
-import { FORMAT_LABELS } from "../types";
+import { FORMAT_LABELS, SPORT_LABELS, type Sport } from "../types";
+import { SportFilter } from "../components/SportField";
 import { scoringRuleLabel } from "../utilities/scoring";
 import type { Entry } from "../types";
 import { DeleteButton } from "../components/DeleteButton";
 
 export function TournamentsPage() {
+  const [sport, setSport] = useState<Sport | "all">("all");
   const { data, configured, user } = useApp();
   const [filter, setFilter] = useState("all"),
     [search, setSearch] = useState("");
@@ -50,6 +52,7 @@ export function TournamentsPage() {
     .filter(
       (t) =>
         !t.queue_session_id &&
+        (sport === "all" || (t.sport ?? "badminton") === sport) &&
         (filter === "all" || t.status === filter) &&
         t.name.toLowerCase().includes(search.toLowerCase()),
     )
@@ -68,6 +71,7 @@ export function TournamentsPage() {
         }
       />
       <div className="list-toolbar standalone">
+        <SportFilter value={sport} onChange={setSport} />
         <div className="tab-buttons">
           {["all", "draft", "ongoing", "completed"].map((f) => (
             <button
@@ -122,6 +126,7 @@ export function TournamentsPage() {
                 <Link to={`/tournaments/${t.id}`}>{t.name}</Link>
               </h2>
               <p className="muted">
+                {SPORT_LABELS[t.sport ?? "badminton"]} ·{" "}
                 {FORMAT_LABELS[t.format]} · {t.play_type}
               </p>
               <div className="tournament-meta">
@@ -342,6 +347,7 @@ export function TournamentDetailPage() {
         </span>
         <span>
           {tournament.best_of === 3 ? "Best of 3" : "One game"} ·{" "}
+          {SPORT_LABELS[tournament.sport ?? "badminton"]} ·{" "}
           {scoringRuleLabel(tournament.scoring_rule)}
         </span>
         {tournament.published && (

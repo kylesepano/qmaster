@@ -20,11 +20,12 @@ import {
 } from "lucide-react";
 import { useApp } from "../hooks/useApp";
 import { db, rpc } from "../services/api";
-import type { PlayType, ScoringRule, BracketFormat } from "../types";
-import { FORMAT_LABELS } from "../types";
+import type { PlayType, ScoringRule, BracketFormat, Sport } from "../types";
+import { FORMAT_LABELS, SPORT_LABELS } from "../types";
 import { QueueTeams } from "../components/QueueTeams";
 import { QueueBracketSession } from "../components/QueueBracketSession";
 import { ScoringRuleField } from "../components/ScoringRuleField";
+import { SportField, SportFilter } from "../components/SportField";
 import { scoringRuleLabel } from "../utilities/scoring";
 import {
   busyPlayerIds,
@@ -36,23 +37,32 @@ import { CourtCard } from "../components/CourtCard";
 import { DeleteButton } from "../components/DeleteButton";
 import { PublishSessionButton } from "../components/PublishSessionButton";
 import { PlayerMultiSelect } from "../components/PlayerMultiSelect";
+import { SessionTiming } from "../components/SessionTiming";
+import { PickleballRotation } from "../components/PickleballRotation";
 
 export function QueueListPage() {
   const { data, user, act, busy, configured } = useApp();
   const [params] = useSearchParams();
   const [creating, setCreating] = useState(params.get("new") === "1");
   const [name, setName] = useState("");
+  const [sport, setSport] = useState<Sport>("badminton");
+  const [filterSport, setFilterSport] = useState<Sport | "all">("all");
   const [playType, setPlayType] = useState<PlayType>("doubles");
   const [courts, setCourts] = useState(3);
   const [bestOf, setBestOf] = useState<1 | 3>(1);
   const [scoringRule, setScoringRule] = useState<ScoringRule>("standard_21");
   const [mode, setMode] = useState<"normal" | "bracket">("normal");
+  const [hours, setHours] = useState(2);
+  const [minutes, setMinutes] = useState(15);
+  const [expectedPlayers, setExpectedPlayers] = useState(8);
   const [bracketFormat, setBracketFormat] =
     useState<BracketFormat>("single_elimination");
   const navigate = useNavigate();
-  const sessions = [...data.queueSessions].sort((a, b) =>
-    b.created_at.localeCompare(a.created_at),
-  );
+  const sessions = [...data.queueSessions]
+    .filter(
+      (s) => filterSport === "all" || (s.sport ?? "badminton") === filterSport,
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
   async function create(event: FormEvent) {
     event.preventDefault();
     if (!user) return;
@@ -67,8 +77,12 @@ export function QueueListPage() {
           court_count: courts,
           best_of: bestOf,
           scoring_rule: scoringRule,
+          sport,
           mode,
           bracket_format: bracketFormat,
+          ...(sport === "pickleball" && mode === "normal"
+            ? { session_hours: hours, estimated_match_minutes: minutes }
+            : {}),
         })
         .select("id")
         .single();
@@ -111,6 +125,17 @@ export function QueueListPage() {
             </button>
           </div>
           <div className="form-grid">
+            <SportField
+              value={sport}
+              onChange={(next) => {
+                setSport(next);
+                setScoringRule(
+                  next === "pickleball"
+                    ? "pickleball_11_sudden_death"
+                    : "standard_21",
+                );
+              }}
+            />
             <label className="field">
               <span>Session name</span>
               <input
@@ -158,7 +183,38 @@ export function QueueListPage() {
               </select>
             </label>
           </div>
-          <ScoringRuleField value={scoringRule} onChange={setScoringRule} />
+          <ScoringRuleField
+            sport={sport}
+            value={scoringRule}
+            onChange={setScoringRule}
+          />
+          {sport === "pickleball" && mode === "normal" && (
+            <>
+              <label className="field">
+                Expected players (estimate only)
+                <input
+                  type="number"
+                  min={playType === "singles" ? 2 : 4}
+                  max="256"
+                  required
+                  value={expectedPlayers}
+                  onChange={(e) => setExpectedPlayers(Number(e.target.value))}
+                />
+              </label>
+              <SessionTiming
+                hours={hours}
+                minutes={minutes}
+                courts={courts}
+                playType={playType}
+                played={Array.from(
+                  { length: Math.max(0, Math.min(256, expectedPlayers)) },
+                  () => 0,
+                )}
+                onHours={setHours}
+                onMinutes={setMinutes}
+              />
+            </>
+          )}
           <div className="form-grid">
             <label className="field">
               Session mode
@@ -205,6 +261,9 @@ export function QueueListPage() {
           </div>
         </form>
       )}
+      <div className="list-toolbar standalone">
+        <SportFilter value={filterSport} onChange={setFilterSport} />
+      </div>
       {sessions.length ? (
         <div className="grid-3">
           {sessions.map((session) => {
@@ -250,6 +309,7 @@ export function QueueListPage() {
                   <Link to={`/queue/${session.id}`}>{session.name}</Link>
                 </h2>
                 <p className="muted">
+                  {SPORT_LABELS[session.sport ?? "badminton"]} ·{" "}
                   {session.play_type === "mixed"
                     ? "Mixed doubles"
                     : session.play_type === "doubles"
@@ -303,6 +363,7 @@ export function QueueDetailPage() {
   const { id } = useParams();
   const { data, act, busy, loading } = useApp();
   const session = data.queueSessions.find((item) => item.id === id);
+  const rotation = data.queueRotations?.find((r) => r.session_id === id);
   const [adding, setAdding] = useState<string[]>([]);
   const [selection, setSelection] = useState<string[]>([]);
   const [court, setCourt] = useState(1);
@@ -429,7 +490,10 @@ export function QueueDetailPage() {
             {members.length} players · {waiting.length} waiting ·{" "}
             {active.length} courts occupied
           </p>
-          <p className="muted">{scoringRuleLabel(session.scoring_rule)}</p>
+          <p className="muted">
+            {SPORT_LABELS[session.sport ?? "badminton"]} ·{" "}
+            {scoringRuleLabel(session.scoring_rule)}
+          </p>
         </div>
         <div className="header-actions">
           <span
@@ -484,8 +548,13 @@ export function QueueDetailPage() {
           );
         })}
       </div>
-      {session.play_type !== "singles" && <QueueTeams session={session} />}
-      <div className="grid-2 queue-columns">
+      {session.sport === "pickleball" && (
+        <PickleballRotation key={session.id} session={session} />
+      )}
+      {session.sport !== "pickleball" && session.play_type !== "singles" && (
+        <QueueTeams session={session} />
+      )}
+      <div className={rotation ? "stack" : "grid-2 queue-columns"}>
         <section className="card stack">
           <div className="card-header">
             <h2>
@@ -494,7 +563,7 @@ export function QueueDetailPage() {
             </h2>
             <span className="badge">{waiting.length} players</span>
           </div>
-          {session.status === "ongoing" && (
+          {session.status === "ongoing" && !rotation && (
             <form className="stack" onSubmit={addPlayers}>
               <div className="field">
                 <span>Add registered players</span>
@@ -528,7 +597,7 @@ export function QueueDetailPage() {
                         : "Waiting for a court"}
                     </small>
                   </div>
-                  {session.status === "ongoing" && (
+                  {session.status === "ongoing" && !rotation && (
                     <>
                       <label
                         className="check-label"
@@ -552,7 +621,7 @@ export function QueueDetailPage() {
                       <button
                         className="btn ghost icon-button"
                         aria-label={`Remove ${playerName(member.player_id)} from queue`}
-                        disabled={busy}
+                        disabled={busy || !!rotation}
                         onClick={() =>
                           void act(
                             () =>
@@ -589,7 +658,7 @@ export function QueueDetailPage() {
                       <input
                         type="checkbox"
                         checked={member.rejoin}
-                        disabled={busy}
+                        disabled={busy || !!rotation}
                         onChange={(event) =>
                           void act(() =>
                             rpc("set_queue_rejoin", {
@@ -606,127 +675,129 @@ export function QueueDetailPage() {
             </div>
           )}
         </section>
-        <section className="card stack">
-          <div className="card-header">
-            <div>
-              <h2>
-                <Play size={18} />
-                Call next players
-              </h2>
-              <p className="muted">
-                FIFO suggestions. Adjust the teams before starting.
-              </p>
-            </div>
-            <button
-              className="btn ghost small"
-              disabled={busy || session.status !== "ongoing"}
-              onClick={() => setSelection(suggested)}
-            >
-              <RefreshCw size={14} />
-              Suggest next
-            </button>
-          </div>
-          {session.status === "ongoing" ? (
-            <form onSubmit={startMatch} className="stack">
-              {slots === 4 && (
-                <div className="form-grid">
-                  <label className="field">
-                    Team A name (optional)
-                    <input
-                      maxLength={150}
-                      placeholder="Defaults to player names"
-                      value={teamAName}
-                      onChange={(e) => setTeamAName(e.target.value)}
-                    />
-                  </label>
-                  <label className="field">
-                    Team B name (optional)
-                    <input
-                      maxLength={150}
-                      placeholder="Defaults to player names"
-                      value={teamBName}
-                      onChange={(e) => setTeamBName(e.target.value)}
-                    />
-                  </label>
-                </div>
-              )}
-              <div className="form-grid">
-                {Array.from({ length: slots }, (_, index) => (
-                  <label className="field" key={index}>
-                    <span>
-                      Side {index < slots / 2 ? "A" : "B"}
-                      {slots === 4 ? ` · Player ${(index % 2) + 1}` : ""}
-                    </span>
-                    <select
-                      required
-                      value={selection[index] ?? ""}
-                      onChange={(event) => {
-                        const next = Array.from(
-                          { length: slots },
-                          (_, item) => selection[item] ?? "",
-                        );
-                        next[index] = event.target.value;
-                        setSelection(next);
-                      }}
-                    >
-                      <option value="">Select player</option>
-                      {eligible
-                        .filter(
-                          (member) =>
-                            !selection.includes(member.player_id) ||
-                            selection[index] === member.player_id,
-                        )
-                        .map((member) => (
-                          <option value={member.player_id} key={member.id}>
-                            {playerName(member.player_id)}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                ))}
+        {!rotation && (
+          <section className="card stack">
+            <div className="card-header">
+              <div>
+                <h2>
+                  <Play size={18} />
+                  Call next players
+                </h2>
+                <p className="muted">
+                  FIFO suggestions. Adjust the teams before starting.
+                </p>
               </div>
-              <label className="field">
-                <span>Available court</span>
-                <select
-                  required
-                  value={availableCourts.length ? court : ""}
-                  onChange={(event) => setCourt(Number(event.target.value))}
-                >
-                  {availableCourts.length ? (
-                    availableCourts.map((number) => (
-                      <option key={number} value={number}>
-                        Court {number}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">All courts occupied</option>
-                  )}
-                </select>
-              </label>
-              <p className="muted">
-                {eligible.length < slots
-                  ? `Need ${slots - eligible.length} more available player${slots - eligible.length === 1 ? "" : "s"} for a ${session.play_type} match.`
-                  : "Players who choose to rejoin return to the back of the queue."}
-              </p>
               <button
-                className="btn primary"
-                disabled={
-                  busy ||
-                  !availableCourts.length ||
-                  selection.filter(Boolean).length !== slots ||
-                  new Set(selection).size !== slots
-                }
+                className="btn ghost small"
+                disabled={busy || session.status !== "ongoing"}
+                onClick={() => setSelection(suggested)}
               >
-                <Play size={16} />
-                Call players & start match
+                <RefreshCw size={14} />
+                Suggest next
               </button>
-            </form>
-          ) : (
-            <p className="muted">
-              This session has ended. All results remain in match history.
-            </p>
-          )}
-        </section>
+            </div>
+            {session.status === "ongoing" ? (
+              <form onSubmit={startMatch} className="stack">
+                {slots === 4 && (
+                  <div className="form-grid">
+                    <label className="field">
+                      Team A name (optional)
+                      <input
+                        maxLength={150}
+                        placeholder="Defaults to player names"
+                        value={teamAName}
+                        onChange={(e) => setTeamAName(e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      Team B name (optional)
+                      <input
+                        maxLength={150}
+                        placeholder="Defaults to player names"
+                        value={teamBName}
+                        onChange={(e) => setTeamBName(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                )}
+                <div className="form-grid">
+                  {Array.from({ length: slots }, (_, index) => (
+                    <label className="field" key={index}>
+                      <span>
+                        Side {index < slots / 2 ? "A" : "B"}
+                        {slots === 4 ? ` · Player ${(index % 2) + 1}` : ""}
+                      </span>
+                      <select
+                        required
+                        value={selection[index] ?? ""}
+                        onChange={(event) => {
+                          const next = Array.from(
+                            { length: slots },
+                            (_, item) => selection[item] ?? "",
+                          );
+                          next[index] = event.target.value;
+                          setSelection(next);
+                        }}
+                      >
+                        <option value="">Select player</option>
+                        {eligible
+                          .filter(
+                            (member) =>
+                              !selection.includes(member.player_id) ||
+                              selection[index] === member.player_id,
+                          )
+                          .map((member) => (
+                            <option value={member.player_id} key={member.id}>
+                              {playerName(member.player_id)}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <label className="field">
+                  <span>Available court</span>
+                  <select
+                    required
+                    value={availableCourts.length ? court : ""}
+                    onChange={(event) => setCourt(Number(event.target.value))}
+                  >
+                    {availableCourts.length ? (
+                      availableCourts.map((number) => (
+                        <option key={number} value={number}>
+                          Court {number}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">All courts occupied</option>
+                    )}
+                  </select>
+                </label>
+                <p className="muted">
+                  {eligible.length < slots
+                    ? `Need ${slots - eligible.length} more available player${slots - eligible.length === 1 ? "" : "s"} for a ${session.play_type} match.`
+                    : "Players who choose to rejoin return to the back of the queue."}
+                </p>
+                <button
+                  className="btn primary"
+                  disabled={
+                    busy ||
+                    !availableCourts.length ||
+                    selection.filter(Boolean).length !== slots ||
+                    new Set(selection).size !== slots
+                  }
+                >
+                  <Play size={16} />
+                  Call players & start match
+                </button>
+              </form>
+            ) : (
+              <p className="muted">
+                This session has ended. All results remain in match history.
+              </p>
+            )}
+          </section>
+        )}
       </div>
       <section className="card">
         <div className="card-header">

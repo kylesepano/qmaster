@@ -5,7 +5,7 @@ import { PublicLayout } from "../components/PublicLayout";
 import { Badge, EmptyState, PageHeader, dateLabel } from "../components/ui";
 import { loadPublicSessions } from "../services/api";
 import { usePublicData } from "../hooks/usePublicData";
-import type { PublicSessionMatch } from "../types";
+import { SPORT_LABELS, type PublicSessionMatch } from "../types";
 import { scoringRuleLabel } from "../utilities/scoring";
 import { BracketView, Standings } from "../components/BracketView";
 
@@ -99,7 +99,7 @@ export function PublicSessionPage() {
         <>
           <PageHeader
             title={session.name}
-            subtitle={`${session.play_type} · ${session.best_of === 3 ? "Best of 3" : "One game"} · ${scoringRuleLabel(session.scoring_rule)} · ${dateLabel(session.created_at)}`}
+            subtitle={`${SPORT_LABELS[session.sport ?? "badminton"]} · ${session.play_type} · ${session.best_of === 3 ? "Best of 3" : "One game"} · ${scoringRuleLabel(session.scoring_rule)} · ${dateLabel(session.created_at)}`}
             eyebrow="QUEUE SESSION"
             actions={
               <Badge tone={session.status === "ongoing" ? "green" : ""}>

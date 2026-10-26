@@ -10,8 +10,10 @@ import type {
   PlayType,
   BracketFormat,
   ScoringRule,
+  Sport,
 } from "../types";
 import { ScoringRuleField } from "./ScoringRuleField";
+import { SportField } from "./SportField";
 import { FORMAT_LABELS } from "../types";
 
 export function TournamentForm({
@@ -24,6 +26,7 @@ export function TournamentForm({
   const { user, data, busy, act, configured } = useApp();
   const navigate = useNavigate();
   const [name, setName] = useState(tournament?.name ?? "");
+  const [sport, setSport] = useState<Sport>(tournament?.sport ?? "badminton");
   const [date, setDate] = useState(
     tournament?.event_date ?? new Date().toLocaleDateString("en-CA"),
   );
@@ -76,6 +79,7 @@ export function TournamentForm({
               court_count: courtCount,
               best_of: bestOf,
               scoring_rule: scoringRule,
+              sport,
               banner_path,
             };
             try {
@@ -124,6 +128,18 @@ export function TournamentForm({
           </div>
         )}
         <div className="form-grid">
+          <SportField
+            value={sport}
+            disabled={formatLocked}
+            onChange={(next) => {
+              setSport(next);
+              setScoringRule(
+                next === "pickleball"
+                  ? "pickleball_11_sudden_death"
+                  : "standard_21",
+              );
+            }}
+          />
           <label className="field">
             Tournament name
             <input
@@ -211,6 +227,7 @@ export function TournamentForm({
           </label>
         </div>
         <ScoringRuleField
+          sport={sport}
           value={scoringRule}
           onChange={setScoringRule}
           disabled={formatLocked}

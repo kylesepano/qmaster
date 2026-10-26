@@ -44,7 +44,7 @@ export function LoginPage() {
         <div className="login-form">
           <span className="eyebrow">WELCOME TO QMASTER</span>
           <h2>Back in the game.</h2>
-          <p className="muted">Sign in to manage your badminton workspace.</p>
+          <p className="muted">Sign in to manage your Qmaster workspace.</p>
           {!configured ? (
             <div className="setup-card">
               <ShieldCheck size={26} />

@@ -5,6 +5,42 @@ import { playerRecords } from "./playerRecords";
 import { suggestNextPlayers } from "./queue";
 
 describe("individual player records", () => {
+  it("keeps pickleball and badminton records separate for the same player", () => {
+    const data = {
+      ...EMPTY_DATA,
+      players: [{ id: "a" }, { id: "b" }],
+      tournaments: [{ id: "t", sport: "pickleball" }],
+      entries: [
+        { id: "a", player_ids: ["a"] },
+        { id: "b", player_ids: ["b"] },
+      ],
+      tournamentMatches: [
+        {
+          tournament_id: "t",
+          status: "completed",
+          entry_a_id: "a",
+          entry_b_id: "b",
+          winner_entry_id: "a",
+        },
+      ],
+      queueSessions: [{ id: "s", sport: "badminton" }],
+      queueMatches: [
+        { id: "m", session_id: "s", status: "completed", winner_side: "b" },
+      ],
+      queueMatchPlayers: [
+        { match_id: "m", player_id: "a", side: "a" },
+        { match_id: "m", player_id: "b", side: "b" },
+      ],
+    } as AppData;
+    expect(playerRecords(data, "pickleball").get("a")).toEqual({
+      wins: 1,
+      losses: 0,
+    });
+    expect(playerRecords(data, "badminton").get("a")).toEqual({
+      wins: 0,
+      losses: 1,
+    });
+  });
   it("counts team wins for both members, ignores BYEs and live matches, and follows corrected winners", () => {
     const data = {
       ...EMPTY_DATA,

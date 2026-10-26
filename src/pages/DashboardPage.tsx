@@ -146,7 +146,7 @@ export function DashboardPage() {
           <div className="card-header">
             <div>
               <h2>Court overview</h2>
-              <p>A little less waiting. A lot more badminton.</p>
+              <p>A little less waiting. A lot more play.</p>
             </div>
             <Badge tone={occupied ? "green" : ""}>
               <span className="tiny-dot" />
